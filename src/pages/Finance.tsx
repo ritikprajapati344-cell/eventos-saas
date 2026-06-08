@@ -186,7 +186,7 @@ export default function Finance({ data }: FinanceProps) {
         <KpiCard title="Ledger Expense" value={formatCurrency(ledgerTotals.expense)} helper="Manual finance entries" icon={WalletCards} tone="warning" />
       </section>
 
-      <section className="grid gap-3 md:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <KpiCard title="Sponsor Receivable" value={formatCurrency(receivables.sponsorReceivable)} helper="Deals minus received" icon={ReceiptIndianRupee} tone="warning" />
         <KpiCard title="Vendor Payable" value={formatCurrency(receivables.vendorPayable)} helper="Remaining vendor balances" icon={WalletCards} tone="danger" />
         <KpiCard title="Artist Payable" value={formatCurrency(receivables.artistPayable)} helper="Unpaid artist balances" icon={BadgeIndianRupee} tone="danger" />
@@ -194,7 +194,7 @@ export default function Finance({ data }: FinanceProps) {
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <ChartCard title="Financial Forecast" subtitle="Forecast and actual revenue across event planning months">
-          <div className="h-[340px]">
+          <div className="h-[250px] sm:h-[340px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data.revenueForecast}>
                 <defs>
@@ -316,8 +316,8 @@ function TransactionModal({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/76 px-4 py-6 backdrop-blur-sm">
-      <form className="w-full max-w-3xl rounded-lg border border-white/10 bg-app-panel p-5 shadow-premium" onSubmit={onSubmit}>
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-y-auto bg-slate-950/76 px-2 py-3 backdrop-blur-sm sm:place-items-center sm:px-4 sm:py-6">
+      <form className="max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-4 shadow-premium sm:max-h-[92vh] sm:p-5" onSubmit={onSubmit}>
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Finance Ledger</p>
@@ -354,10 +354,10 @@ function TransactionModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" type="submit">
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
             {editing ? "Save Changes" : "Add Transaction"}
           </button>
         </div>

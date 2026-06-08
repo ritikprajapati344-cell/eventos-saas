@@ -275,7 +275,7 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
         }
       />
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <EventKpi title="Revenue" value={formatCurrency(scoped.actualRevenue)} helper="Actual ticket + sponsor" icon={BadgeIndianRupee} tone="success" />
         <EventKpi title="Expenses" value={formatCurrency(scoped.actualExpense)} helper="Paid/recorded event cost" icon={WalletCards} tone="warning" />
         <EventKpi title="Profit" value={formatCurrency(scoped.actualProfit)} helper="Actual revenue minus expense" icon={TrendingUp} tone={scoped.actualProfit >= 0 ? "success" : "danger"} />
@@ -340,7 +340,7 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
         </WorkspacePanel>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
+      <section className="grid gap-4 2xl:grid-cols-3">
         <WorkspacePanel title="Sponsor Management" icon={BriefcaseBusiness}>
           <CompactForm onCancel={editing?.group === "sponsor" ? cancelEdit : undefined} onSubmit={(event) => saveGroup("sponsor", event)} submitLabel={editing?.group === "sponsor" ? "Update Sponsor" : "Add"}>
             <Input label="Company Name" value={forms.sponsor.companyName} onChange={(value) => updateForm("sponsor", "companyName", value)} />
@@ -585,7 +585,7 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
                     {file.fileType} - Uploaded {new Date(file.uploadDate).toLocaleDateString("en-IN")} - {formatFileSize(file.size)}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   <FileAction label="View" icon={Eye} onClick={() => viewFile(file.dataUrl)} />
                   <FileAction label="Download" icon={Download} onClick={() => downloadFile(file)} />
                   <button className="grid h-9 w-9 place-items-center rounded-lg border border-app-danger/30 bg-app-danger/10 text-red-200 transition hover:bg-app-danger/20" onClick={() => deleteFile(file.id)} type="button">
@@ -696,12 +696,12 @@ function EventKpi({ title, value, helper, icon: Icon, tone = "primary" }: { titl
 
 function WorkspacePanel({ title, icon: Icon, children }: { title: string; icon: typeof Ticket; children: React.ReactNode }) {
   return (
-    <section className="glass-panel min-w-0 overflow-hidden rounded-lg p-4">
+    <section className="glass-panel min-w-0 overflow-hidden rounded-lg p-3 sm:p-4">
       <div className="mb-4 flex items-center gap-2">
         <div className="grid h-9 w-9 place-items-center rounded-lg border border-app-primary/25 bg-app-primary/12 text-blue-200">
           <Icon size={17} />
         </div>
-        <h2 className="text-base font-semibold text-white">{title}</h2>
+        <h2 className="min-w-0 break-words text-base font-semibold text-white">{title}</h2>
       </div>
       {children}
     </section>
@@ -709,7 +709,7 @@ function WorkspacePanel({ title, icon: Icon, children }: { title: string; icon: 
 }
 
 function ChartBox({ children }: { children: React.ReactNode }) {
-  return <div className="h-[300px] min-h-0 min-w-0 overflow-hidden">{children}</div>;
+  return <div className="h-[240px] min-h-0 min-w-0 overflow-hidden sm:h-[300px]">{children}</div>;
 }
 
 function ChartEmpty({ text }: { text: string }) {
@@ -730,7 +730,7 @@ function CompactForm({
   return (
     <form className="mb-4 grid gap-3 sm:grid-cols-2" onSubmit={onSubmit}>
       {children}
-      <div className="flex gap-2 sm:self-end">
+      <div className="flex flex-col gap-2 min-[420px]:flex-row sm:self-end">
         {onCancel && (
           <button className="h-10 flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
             Cancel
@@ -794,13 +794,13 @@ function RecordGrid({ emptyText, items }: { emptyText: string; items: RecordCard
       {items.map((item) => (
         <article key={item.id} className="flex min-w-0 flex-col justify-between rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-slate-300">
           <div className="min-w-0">
-            <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-col items-start justify-between gap-2 sm:flex-row sm:gap-3">
               <div className="min-w-0">
                 <p className="break-words font-medium leading-5 text-white">{item.title}</p>
                 {item.meta.length > 0 && <p className="mt-1 break-words text-xs leading-5 text-app-muted">{item.meta.filter(Boolean).join(" - ")}</p>}
               </div>
               {item.badges && (
-                <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex shrink-0 flex-row flex-wrap gap-1 sm:flex-col sm:items-end">
                   {item.badges.map((badge) => <StatusBadge key={`${item.id}-${badge.label}`} label={badge.label} tone={badge.tone} />)}
                 </div>
               )}

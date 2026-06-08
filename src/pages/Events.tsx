@@ -254,7 +254,7 @@ export default function Events({ data, setData }: EventsProps) {
 
       {toast && <div className="rounded-lg border border-app-success/30 bg-app-success/12 px-4 py-3 text-sm font-medium text-green-100">{toast}</div>}
 
-      <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1800px]:grid-cols-5">
         {sections.map((section) => {
           const events = activeEvents.filter((event) => event.status === section.status);
           return (
@@ -314,7 +314,7 @@ export default function Events({ data, setData }: EventsProps) {
           <h2 className="mb-4 text-base font-semibold text-white">Event Timeline</h2>
           <div className="space-y-3">
             {data.timeline.filter((item) => activeEvents.some((event) => event.id === item.eventId)).map((item) => (
-              <div key={item.id} className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 sm:grid-cols-[120px_1fr_auto] sm:items-center">
+              <div key={item.id} className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 sm:grid-cols-[110px_minmax(0,1fr)_auto] sm:items-center">
                 <div className="text-sm text-app-muted">{new Date(item.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>
                 <div>
                   <p className="font-medium text-white">{item.title}</p>
@@ -394,7 +394,7 @@ function EventMiniCard({
 
   return (
     <article className="relative rounded-lg border border-white/10 bg-slate-950/35 p-3 transition hover:border-app-primary/40 hover:bg-slate-900/70">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <Link className="min-w-0 flex-1 focus:outline-none" to={`/events/${event.id}`}>
           <h3 className="line-clamp-2 break-words text-sm font-semibold leading-5 text-white">{event.name}</h3>
         </Link>
@@ -421,7 +421,7 @@ function EventMiniCard({
           <p className="flex items-center gap-2"><MapPin size={14} />{event.venue}, {event.city}</p>
           <p className="flex items-center gap-2"><Clock size={14} />{new Date(event.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} at {event.eventTime}</p>
         </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="mt-4 grid gap-2 min-[420px]:grid-cols-2">
           <InfoTile label="Capacity" value={formatNumber(event.capacity)} />
           <InfoTile label="Revenue" value={formatCurrency(ticketRevenue + sponsorRevenue)} />
         </div>
@@ -456,8 +456,8 @@ function EventModal({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/76 px-4 py-6 backdrop-blur-sm">
-      <form className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-5 shadow-premium" onSubmit={onSubmit}>
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-y-auto bg-slate-950/76 px-2 py-3 backdrop-blur-sm sm:place-items-center sm:px-4 sm:py-6">
+      <form className="max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-4 shadow-premium sm:max-h-[92vh] sm:p-5" onSubmit={onSubmit}>
         <div className="mb-4">
           <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Events Workspace</p>
           <h2 className="mt-1 text-xl font-semibold text-white">{mode === "create" ? "Create Event" : "Edit Event"}</h2>
@@ -477,9 +477,9 @@ function EventModal({
           <SelectField label="Status" value={form.status} onChange={(value) => onChange("status", value)} options={statusOptions} />
         </div>
         {error && <p className="mt-4 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">{error}</p>}
-        <div className="mt-5 flex justify-end gap-3">
-          <button className="h-10 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm text-slate-200 hover:bg-white/[0.08]" onClick={onCancel} type="button">Cancel</button>
-          <button className="h-10 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow hover:bg-blue-500" type="submit">Save Event</button>
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm text-slate-200 hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">Cancel</button>
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow hover:bg-blue-500 sm:w-auto" type="submit">Save Event</button>
         </div>
       </form>
     </div>

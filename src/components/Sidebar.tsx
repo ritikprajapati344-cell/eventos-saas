@@ -38,7 +38,7 @@ export function Sidebar({ data, onNavigate }: SidebarProps) {
   const eventHealth = getEventHealth(data, location.pathname);
 
   return (
-    <aside className="flex h-full flex-col border-r border-white/10 bg-slate-950/78 p-4 backdrop-blur-xl">
+    <aside className="flex h-full flex-col overflow-y-auto border-r border-white/10 bg-slate-950/78 p-4 backdrop-blur-xl">
       <div className="mb-5 flex items-center gap-3">
         <div className="grid h-11 w-11 place-items-center rounded-lg bg-app-primary text-white shadow-glow">
           <Ticket size={22} />
@@ -101,7 +101,7 @@ function EventHealthCard({ health }: { health: EventHealth }) {
   }
 
   return (
-    <div className="mt-auto rounded-lg border border-app-primary/25 bg-gradient-to-b from-app-panel/95 to-slate-950/70 p-3 shadow-premium">
+    <div className="mt-6 rounded-lg border border-app-primary/25 bg-gradient-to-b from-app-panel/95 to-slate-950/70 p-3 shadow-premium lg:mt-auto">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.14em] text-app-primary">Event Health</p>

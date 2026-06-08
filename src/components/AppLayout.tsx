@@ -29,7 +29,7 @@ export function AppLayout({ children, data }: AppLayoutProps) {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-hidden">
       <div className="fixed inset-y-0 left-0 z-30 hidden w-72 lg:block">
         <Sidebar data={data} />
       </div>
@@ -41,7 +41,7 @@ export function AppLayout({ children, data }: AppLayoutProps) {
             className="absolute inset-0 bg-slate-950/70"
             onClick={() => setIsSidebarOpen(false)}
           />
-          <div className="relative h-full w-72 max-w-[86vw]">
+          <div className="relative h-full w-72 max-w-[88vw]">
             <Sidebar data={data} onNavigate={() => setIsSidebarOpen(false)} />
           </div>
         </div>
@@ -49,7 +49,7 @@ export function AppLayout({ children, data }: AppLayoutProps) {
 
       <main className="lg:pl-72">
         <header className="sticky top-0 z-20 border-b border-white/10 bg-app-bg/78 backdrop-blur-xl">
-          <div className="flex h-16 items-center gap-3 px-4 sm:px-5 lg:px-6">
+          <div className="flex min-h-16 flex-wrap items-center gap-3 px-3 py-2 sm:flex-nowrap sm:px-5 sm:py-0 lg:px-6">
             <button
               aria-label="Open navigation"
               className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-200 lg:hidden"
@@ -58,7 +58,7 @@ export function AppLayout({ children, data }: AppLayoutProps) {
               {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
 
-            <label className="hidden min-w-0 flex-1 items-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-app-muted shadow-inner sm:flex">
+            <label className="order-3 flex min-w-0 basis-full items-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-app-muted shadow-inner sm:order-none sm:flex-1 sm:basis-auto">
               <Search size={18} className="shrink-0" />
               <input
                 className="min-w-0 flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-app-muted"
@@ -70,7 +70,7 @@ export function AppLayout({ children, data }: AppLayoutProps) {
             </label>
 
             <div className="ml-auto flex items-center gap-3">
-              <div className="hidden rounded-lg border border-app-primary/25 bg-app-primary/10 px-3 py-2 text-sm text-app-primary sm:flex">
+              <div className="hidden rounded-lg border border-app-primary/25 bg-app-primary/10 px-3 py-2 text-sm text-app-primary lg:flex">
                 <Sparkles className="mr-2 h-4 w-4 text-app-primary" />
                 Demo Workspace
               </div>
@@ -81,7 +81,7 @@ export function AppLayout({ children, data }: AppLayoutProps) {
           </div>
         </header>
 
-        <div className="mx-auto w-full max-w-[1580px] px-4 py-4 sm:px-5 lg:px-6">{children}</div>
+        <div className="mx-auto w-full max-w-[1580px] px-3 py-4 sm:px-5 lg:px-6">{children}</div>
       </main>
     </div>
   );

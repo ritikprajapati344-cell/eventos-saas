@@ -191,18 +191,18 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
         }
       />
 
-      <section className="grid gap-3 md:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Summary icon={Handshake} label="Closed Sponsor Revenue" value={formatCurrency(closedRevenue)} />
         <Summary icon={TrendingUp} label="Open Pipeline Value" value={formatCurrency(openPipeline)} />
         <Summary icon={BriefcaseBusiness} label="Active Deals" value={activeDeals.toString()} />
       </section>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1800px]:grid-cols-6">
         {stages.map((stage) => {
           const stageSponsors = filteredSponsors.filter((sponsor) => sponsor.status === stage);
           const total = stageSponsors.reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
           return (
-            <div key={stage} className="glass-panel flex min-h-[460px] min-w-0 flex-col rounded-lg p-3">
+            <div key={stage} className="glass-panel flex min-h-[320px] min-w-0 flex-col rounded-lg p-3 sm:min-h-[460px]">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="break-words text-sm font-semibold text-white">{stage}</h2>
@@ -257,7 +257,7 @@ function SponsorCard({
 
   return (
     <article className="flex min-w-0 flex-1 flex-col rounded-lg border border-app-primary/25 bg-gradient-to-b from-app-panel/95 to-slate-950/70 p-3 text-sm shadow-premium transition hover:border-app-primary/45">
-      <div className="flex min-w-0 items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-col items-start justify-between gap-2 min-[430px]:flex-row min-[430px]:gap-3">
         <div className="min-w-0">
           <p className="break-words font-semibold leading-5 text-white">{sponsor.companyName}</p>
           <p className="mt-1 flex min-w-0 items-center gap-2 break-words text-xs leading-5 text-app-muted">
@@ -265,7 +265,7 @@ function SponsorCard({
             {sponsor.contactPerson}
           </p>
         </div>
-        <StatusBadge label={sponsor.status} tone={stageTone[sponsor.status]} />
+        <div className="shrink-0"><StatusBadge label={sponsor.status} tone={stageTone[sponsor.status]} /></div>
       </div>
 
       <div className="mt-3 space-y-1.5 text-xs text-slate-300">
@@ -299,7 +299,7 @@ function SponsorCard({
         </select>
       </label>
 
-      <div className="mt-3 flex justify-end gap-2">
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
         <IconButton icon={Edit3} label="Edit" onClick={onEdit} />
         <IconButton danger icon={Trash2} label="Delete" onClick={onDelete} />
       </div>
@@ -323,8 +323,8 @@ function SponsorModal({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/76 px-4 py-6 backdrop-blur-sm">
-      <form className="w-full max-w-3xl rounded-lg border border-white/10 bg-app-panel p-5 shadow-premium" onSubmit={onSubmit}>
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-y-auto bg-slate-950/76 px-2 py-3 backdrop-blur-sm sm:place-items-center sm:px-4 sm:py-6">
+      <form className="max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-4 shadow-premium sm:max-h-[92vh] sm:p-5" onSubmit={onSubmit}>
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Sponsor CRM</p>
@@ -367,10 +367,10 @@ function SponsorModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" type="submit">
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
             {editing ? "Save Changes" : "Add Sponsor"}
           </button>
         </div>

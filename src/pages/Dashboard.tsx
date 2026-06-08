@@ -244,7 +244,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
       </section>
 
       <section className="glass-panel min-w-0 rounded-lg p-3">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (
@@ -264,7 +264,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
         <ChartCard title="Revenue Forecast" subtitle="Actual revenue against forecasted commercial plan">
-          <ChartBox height="h-[260px]">
+          <ChartBox height="h-[220px] sm:h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.revenueForecast} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
@@ -286,7 +286,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
                   <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-app-primary" />
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-2">
-                      <p className="truncate text-sm font-medium text-white">{activity.message}</p>
+                      <p className="break-words text-sm font-medium leading-5 text-white">{activity.message}</p>
                       {activity.time === "Just now" && <StatusBadge label="New" tone="green" />}
                     </div>
                     <p className="mt-1 text-xs text-app-muted">{activity.entity} - {activity.time}</p>
@@ -302,12 +302,12 @@ export default function Dashboard({ data, setData }: DashboardProps) {
                 const linkedEvent = data.events.find((event) => event.id === task.eventId);
                 return (
                 <div key={task.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col items-start justify-between gap-2 min-[430px]:flex-row min-[430px]:gap-3">
                     <div className="min-w-0">
                       <p className="line-clamp-2 text-sm font-medium leading-5 text-white">{task.title}</p>
                       <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-[0.12em] text-app-muted">{linkedEvent?.name ?? "Event task"}</p>
                     </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
+                    <div className="flex shrink-0 flex-row flex-wrap gap-1 min-[430px]:flex-col min-[430px]:items-end">
                       <StatusBadge label={task.priority} tone={priorityTone[task.priority]} />
                       <StatusBadge label={task.status} tone={taskStatusTone[task.status]} />
                     </div>
@@ -372,9 +372,9 @@ export default function Dashboard({ data, setData }: DashboardProps) {
           <div className="space-y-2">
             {pipelineData.map((item, index) => (
               <div key={item.stage} className="rounded-lg border border-white/10 bg-white/[0.035] p-2.5">
-                <div className="flex items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="font-medium text-white">{item.stage}</span>
-                  <span className="shrink-0 text-app-muted">{item.count} - {formatCurrency(item.value)}</span>
+                  <span className="break-words text-right text-app-muted">{item.count} - {formatCurrency(item.value)}</span>
                 </div>
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
                   <div className="h-full rounded-full bg-app-primary" style={{ width: `${Math.max(18, 100 - index * 12)}%` }} />
@@ -386,7 +386,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
         </Widget>
 
         <Widget title="Ticket Sales Summary">
-          <ChartBox height="h-[238px]">
+          <ChartBox height="h-[220px] sm:h-[238px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ticketSalesData} margin={{ top: 8, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
@@ -403,7 +403,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-2">
         <ChartCard title="Revenue Trend" subtitle="Commercial momentum across planning months">
-          <ChartBox height="h-[248px]">
+          <ChartBox height="h-[220px] sm:h-[248px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <defs>
@@ -423,7 +423,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
         </ChartCard>
 
         <ChartCard title="Monthly Profit" subtitle="Profit trajectory after operating costs">
-          <ChartBox height="h-[248px]">
+          <ChartBox height="h-[220px] sm:h-[248px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={monthlyProfit} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <defs>
@@ -463,9 +463,9 @@ function ChartBox({ height, children }: { height: string; children: ReactNode })
 
 function Widget({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="glass-panel min-w-0 overflow-hidden rounded-lg p-4">
+    <section className="glass-panel min-w-0 overflow-hidden rounded-lg p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="truncate text-sm font-semibold text-white">{title}</h2>
+        <h2 className="break-words text-sm font-semibold text-white">{title}</h2>
         <Plus size={15} className="shrink-0 text-app-muted" />
       </div>
       {children}
@@ -508,8 +508,8 @@ function QuickActionModal({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/76 px-4 py-6 backdrop-blur-sm">
-      <form className="w-full max-w-2xl rounded-lg border border-white/10 bg-app-panel p-5 shadow-premium" onSubmit={onSubmit}>
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-y-auto bg-slate-950/76 px-2 py-3 backdrop-blur-sm sm:place-items-center sm:px-4 sm:py-6">
+      <form className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-4 shadow-premium sm:max-h-[92vh] sm:p-5" onSubmit={onSubmit}>
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Dashboard Action</p>
@@ -531,13 +531,13 @@ function QuickActionModal({
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button
-            className="h-10 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]"
+            className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto"
             onClick={onCancel}
             type="button"
           >
             Cancel
           </button>
-          <button className="h-10 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" type="submit">
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
             Save
           </button>
         </div>

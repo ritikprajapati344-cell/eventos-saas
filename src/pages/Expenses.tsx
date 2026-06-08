@@ -151,7 +151,7 @@ export default function Expenses({ data }: ExpensesProps) {
         }
       />
 
-      <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
         <KpiCard title="Total Expenses" value={formatCurrency(totals.total)} helper="From expense records" icon={WalletCards} tone="warning" />
         <KpiCard title="Paid Expenses" value={formatCurrency(totals.paid)} helper="Marked paid" icon={ReceiptText} tone="success" />
         <KpiCard title="Pending Expenses" value={formatCurrency(totals.pending)} helper="Pending + partial" icon={Landmark} tone="danger" />
@@ -261,8 +261,8 @@ function ExpenseModal({
   vendors: Vendor[];
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/76 px-4 py-6 backdrop-blur-sm">
-      <form className="w-full max-w-3xl rounded-lg border border-white/10 bg-app-panel p-5 shadow-premium" onSubmit={onSubmit}>
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-y-auto bg-slate-950/76 px-2 py-3 backdrop-blur-sm sm:place-items-center sm:px-4 sm:py-6">
+      <form className="max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-4 shadow-premium sm:max-h-[92vh] sm:p-5" onSubmit={onSubmit}>
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Expense Management</p>
@@ -302,10 +302,10 @@ function ExpenseModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" type="submit">
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
             {editing ? "Save Changes" : "Add Expense"}
           </button>
         </div>

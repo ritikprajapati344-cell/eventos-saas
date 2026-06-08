@@ -164,16 +164,16 @@ export default function Artists({ artists }: ArtistsProps) {
         }
       />
 
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="Artist Budget" value={formatCurrency(totals.total)} helper="Fee + travel + hotel" icon={Mic2} />
         <KpiCard title="Performance Fees" value={formatCurrency(totals.fees)} helper="Artist fee commitments" icon={ReceiptIndianRupee} tone="success" />
         <KpiCard title="Travel Cost" value={formatCurrency(totals.travel)} helper="Flights and transfers" icon={Plane} tone="warning" />
         <KpiCard title="Hotel Cost" value={formatCurrency(totals.hotel)} helper="Rooms and hospitality" icon={Hotel} tone="danger" />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {filteredArtists.length === 0 && (
-          <div className="glass-panel rounded-lg p-5 text-sm text-app-muted xl:col-span-3">
+          <div className="glass-panel rounded-lg p-5 text-sm text-app-muted md:col-span-2 2xl:col-span-3">
             No artists added yet.
           </div>
         )}
@@ -181,7 +181,7 @@ export default function Artists({ artists }: ArtistsProps) {
           const contractStatus = normalizeContractStatus(artist.contractStatus);
           return (
             <article key={artist.id} className="glass-panel flex min-w-0 flex-col rounded-lg p-4">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col items-start justify-between gap-2 min-[430px]:flex-row min-[430px]:gap-3">
                 <div className="min-w-0">
                   <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Artist Profile</p>
                   <h2 className="mt-2 break-words text-lg font-semibold text-white">{artist.name}</h2>
@@ -204,7 +204,7 @@ export default function Artists({ artists }: ArtistsProps) {
                     <FileSignature size={16} />
                     Contract Status
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col items-stretch gap-2 min-[430px]:flex-row min-[430px]:items-center">
                     <select className="dashboard-input h-9 text-xs" onChange={(event) => updateContractStatus(artist, event.target.value as ArtistContractStatus)} value={contractStatus}>
                       {contractOptions.map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
@@ -213,7 +213,7 @@ export default function Artists({ artists }: ArtistsProps) {
                 </label>
               </div>
 
-              <div className="mt-4 flex justify-end gap-2">
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
                 <IconButton icon={Edit3} label="Edit" onClick={() => openEditModal(artist)} />
                 <IconButton danger icon={Trash2} label="Delete" onClick={() => deleteArtist(artist)} />
               </div>
@@ -255,8 +255,8 @@ function ArtistModal({
   total: number;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/76 px-4 py-6 backdrop-blur-sm">
-      <form className="w-full max-w-3xl rounded-lg border border-white/10 bg-app-panel p-5 shadow-premium" onSubmit={onSubmit}>
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-y-auto bg-slate-950/76 px-2 py-3 backdrop-blur-sm sm:place-items-center sm:px-4 sm:py-6">
+      <form className="max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-4 shadow-premium sm:max-h-[92vh] sm:p-5" onSubmit={onSubmit}>
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Artist Workspace</p>
@@ -297,10 +297,10 @@ function ArtistModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" type="submit">
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
             {editing ? "Save Changes" : "Add Artist"}
           </button>
         </div>

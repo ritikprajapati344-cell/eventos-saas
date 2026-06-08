@@ -51,7 +51,7 @@ export default function Reports({ data }: ReportsProps) {
     <div className="space-y-6">
       <PageHeader title="Reports" description="Commercial reports for organizers, partners and internal event reviews." />
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <SummaryCard icon={BadgeIndianRupee} label="Revenue" value={formatCurrency(totalRevenue)} />
         <SummaryCard icon={WalletCards} label="Expenses" value={formatCurrency(totalExpenses)} />
         <SummaryCard icon={TrendingUp} label="Net Profit" value={formatCurrency(netProfit)} positive />
@@ -61,8 +61,8 @@ export default function Reports({ data }: ReportsProps) {
         {reports.map((report) => {
           const Icon = report.icon;
           return (
-            <article key={report.title} className="glass-panel rounded-lg p-5">
-              <div className="flex items-start gap-4">
+            <article key={report.title} className="glass-panel rounded-lg p-4 sm:p-5">
+              <div className="flex flex-col items-start gap-4 min-[430px]:flex-row">
                 <div className="grid h-12 w-12 place-items-center rounded-lg border border-app-primary/30 bg-app-primary/15 text-blue-200">
                   <Icon size={22} />
                 </div>
@@ -82,7 +82,7 @@ export default function Reports({ data }: ReportsProps) {
 
       <section className="glass-panel rounded-lg p-5">
         <h2 className="text-base font-semibold text-white">Profit Formula</h2>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <FormulaTile label="Total Revenue" value={formatCurrency(totalRevenue)} helper={`Includes ${formatCurrency(getSponsorRevenue(data.sponsors))} sponsor revenue`} />
           <FormulaTile label="Total Expenses" value={formatCurrency(totalExpenses)} helper="From venue, artist, marketing and operations" />
           <FormulaTile label="Net Profit" value={formatCurrency(netProfit)} helper="Revenue minus expenses" />

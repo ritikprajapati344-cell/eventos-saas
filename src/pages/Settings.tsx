@@ -122,7 +122,7 @@ export default function Settings() {
       {toast && <p className="rounded-lg border border-app-success/30 bg-app-success/10 px-3 py-2 text-sm text-green-100">{toast}</p>}
 
       <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-        <div className="glass-panel rounded-lg p-5">
+        <div className="glass-panel rounded-lg p-4 sm:p-5">
           <h2 className="flex items-center gap-2 text-base font-semibold text-white">
             <Building2 size={19} />
             Company Information
@@ -130,11 +130,11 @@ export default function Settings() {
           <div className="mt-5 space-y-4">
             <label className="block">
               <span className="text-xs uppercase tracking-[0.12em] text-app-muted">Company Logo</span>
-              <div className="mt-2 flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3">
+              <div className="mt-2 flex flex-col items-stretch gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3 sm:flex-row sm:items-center">
                 <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg border border-white/10 bg-slate-950/40 text-sm font-semibold text-white">
                   {settings.companyLogo ? <img alt="Company logo" className="h-full w-full object-cover" src={settings.companyLogo} /> : "Logo"}
                 </div>
-                <input accept="image/*" className="block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-app-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" onChange={uploadLogo} type="file" />
+                <input accept="image/*" className="block min-w-0 w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-app-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" onChange={uploadLogo} type="file" />
               </div>
             </label>
             <Field label="Company Name" onChange={(value) => updateSetting("companyName", value)} value={settings.companyName} />
@@ -172,11 +172,11 @@ export default function Settings() {
           </SettingsPanel>
 
           <SettingsPanel icon={Download} title="Workspace Backup">
-            <button className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={exportWorkspace} type="button">
+            <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-center text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={exportWorkspace} type="button">
               <Download size={17} />
               Export Full EventOS Data
             </button>
-            <label className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]">
+            <label className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-center text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]">
               <Upload size={17} />
               Import Full EventOS Data
               <input accept="application/json,.json" className="hidden" onChange={importWorkspace} type="file" />
@@ -198,7 +198,7 @@ function SettingsPanel({
   children: ReactNode;
 }) {
   return (
-    <div className="glass-panel rounded-lg p-5">
+    <div className="glass-panel rounded-lg p-4 sm:p-5">
       <h2 className="mb-5 flex items-center gap-2 text-base font-semibold text-white">
         <Icon size={19} />
         {title}
