@@ -3,11 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { BriefcaseBusiness, CalendarClock, Edit3, Handshake, Mail, Phone, Plus, TrendingUp, Trash2, UserRound, X } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { SponsorsDataSource } from "../hooks/useSponsorsData";
+import type { SponsorWriteInput } from "../lib/sponsorsRepository";
 import type { EventOSData, Sponsor, SponsorStatus } from "../types";
 import { formatCurrency, getPipelineValue, getSponsorRevenue } from "../utils/finance";
 
 interface SponsorsProps {
   sponsors: Sponsor[];
+  sponsorsData: SponsorsDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
 }
 
@@ -50,20 +53,24 @@ const stageTone: Record<SponsorStatus, "blue" | "green" | "amber" | "red" | "sla
   "Closed Lost": "red",
 };
 
-export default function Sponsors({ sponsors, setData }: SponsorsProps) {
+export default function Sponsors({ sponsors, sponsorsData, setData }: SponsorsProps) {
+  const [actionError, setActionError] = useState("");
   const [editingSponsorId, setEditingSponsorId] = useState<string | null>(null);
   const [errors, setErrors] = useState<SponsorFormErrors>({});
   const [form, setForm] = useState<SponsorForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    if (sponsorsData.isSupabaseMode) return;
+
     setData((current) => {
       const cleanedSponsors = dedupeSponsors(current.sponsors).filter((sponsor) => !isStaleSponsor(sponsor));
       if (cleanedSponsors.length === current.sponsors.length) return current;
       return { ...current, sponsors: cleanedSponsors };
     });
-  }, [setData]);
+  }, [setData, sponsorsData.isSupabaseMode]);
 
   useEffect(() => {
     const handleGlobalSearch = (event: Event) => {
@@ -79,8 +86,11 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
   const closedRevenue = getSponsorRevenue(cleanSponsors);
   const openPipeline = getPipelineValue(cleanSponsors);
   const activeDeals = cleanSponsors.filter((sponsor) => !["Closed Won", "Closed Lost"].includes(sponsor.status)).length;
+  const visibleActionError = actionError || sponsorsData.error;
 
   const openAddModal = () => {
+    sponsorsData.clearError();
+    setActionError("");
     setEditingSponsorId(null);
     setForm(initialForm);
     setErrors({});
@@ -88,6 +98,8 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
   };
 
   const openEditModal = (sponsor: Sponsor) => {
+    sponsorsData.clearError();
+    setActionError("");
     setEditingSponsorId(sponsor.id);
     setForm({
       agreementUploaded: sponsor.agreementUploaded ? "Yes" : "No",
@@ -118,7 +130,7 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const saveSponsor = (event: FormEvent<HTMLFormElement>) => {
+  const saveSponsor = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const validationErrors = validateSponsorForm(form);
     if (Object.keys(validationErrors).length > 0) {
@@ -127,6 +139,40 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
     }
 
     const sponsorPayload = makeSponsorPayload(form);
+
+    if (sponsorsData.isSupabaseMode) {
+      setIsSaving(true);
+      try {
+        const existingSponsor = editingSponsorId
+          ? sponsors.find((sponsor) => sponsor.id === editingSponsorId)
+          : undefined;
+        const writeInput = sponsorToWriteInput(sponsorPayload, existingSponsor?.eventId);
+
+        if (editingSponsorId) {
+          await sponsorsData.updateSponsor(editingSponsorId, writeInput);
+        } else {
+          await sponsorsData.createSponsor(writeInput);
+        }
+
+        setData((current) => ({
+          ...current,
+          activities: [{
+            id: `activity-${Date.now()}`,
+            message: `${editingSponsorId ? "Updated" : "Added"} sponsor ${form.companyName.trim()}`,
+            entity: "Sponsors",
+            time: "Just now",
+            type: "Sponsor",
+          }, ...current.activities],
+        }));
+        closeModal();
+      } catch (saveError) {
+        setActionError(getErrorMessage(saveError, "Unable to save the sponsor."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setData((current) => {
       const sponsorsWithoutStale = dedupeSponsors(current.sponsors).filter((sponsor) => !isStaleSponsor(sponsor));
       const nextSponsors = editingSponsorId
@@ -148,8 +194,32 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
     closeModal();
   };
 
-  const deleteSponsor = (sponsor: Sponsor) => {
+  const deleteSponsor = async (sponsor: Sponsor) => {
     if (!window.confirm(`Delete sponsor ${sponsor.companyName}?`)) return;
+
+    if (sponsorsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await sponsorsData.deleteSponsor(sponsor.id);
+        setData((current) => ({
+          ...current,
+          activities: [{
+            id: `activity-${Date.now()}`,
+            message: `Deleted sponsor ${sponsor.companyName}`,
+            entity: "Sponsors",
+            time: "Just now",
+            type: "Sponsor",
+          }, ...current.activities],
+        }));
+      } catch (deleteError) {
+        setActionError(getErrorMessage(deleteError, "Unable to delete the sponsor."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setData((current) => ({
       ...current,
       sponsors: current.sponsors.filter((item) => item.id !== sponsor.id),
@@ -163,8 +233,32 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
     }));
   };
 
-  const changeStage = (sponsor: Sponsor, status: SponsorStatus) => {
+  const changeStage = async (sponsor: Sponsor, status: SponsorStatus) => {
     if (sponsor.status === status) return;
+
+    if (sponsorsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await sponsorsData.changeStage(sponsor.id, status);
+        setData((current) => ({
+          ...current,
+          activities: [{
+            id: `activity-${Date.now()}`,
+            message: `${sponsor.companyName} moved to ${status}`,
+            entity: "Sponsors",
+            time: "Just now",
+            type: "Sponsor",
+          }, ...current.activities],
+        }));
+      } catch (stageError) {
+        setActionError(getErrorMessage(stageError, "Unable to change the sponsor stage."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setData((current) => ({
       ...current,
       sponsors: current.sponsors.map((item) => (item.id === sponsor.id ? { ...item, status } : item)),
@@ -184,7 +278,7 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
         title="Sponsors"
         description="Kanban CRM pipeline for sponsorship outreach, proposals, negotiation and closed revenue."
         action={
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" onClick={openAddModal} type="button">
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={openAddModal} type="button">
             <Plus size={17} />
             Add Sponsor
           </button>
@@ -197,42 +291,69 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
         <Summary icon={BriefcaseBusiness} label="Active Deals" value={activeDeals.toString()} />
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1800px]:grid-cols-6">
-        {stages.map((stage) => {
-          const stageSponsors = filteredSponsors.filter((sponsor) => sponsor.status === stage);
-          const total = stageSponsors.reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
-          return (
-            <div key={stage} className="glass-panel flex min-h-[320px] min-w-0 flex-col rounded-lg p-3 sm:min-h-[460px]">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="break-words text-sm font-semibold text-white">{stage}</h2>
-                  <p className="mt-1 text-xs text-app-muted">{formatCurrency(total)}</p>
-                </div>
-                <span className="shrink-0 rounded-full bg-white/[0.06] px-2.5 py-1 text-xs text-slate-300">{stageSponsors.length}</span>
-              </div>
+      {visibleActionError && (
+        <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
+          {visibleActionError}
+        </div>
+      )}
 
-              <div className="flex flex-1 flex-col gap-3">
-                {stageSponsors.length === 0 && <p className="rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-app-muted">No sponsors in this stage.</p>}
-                {stageSponsors.map((sponsor) => (
-                  <SponsorCard
-                    key={sponsor.id}
-                    onDelete={() => deleteSponsor(sponsor)}
-                    onEdit={() => openEditModal(sponsor)}
-                    onStageChange={(status) => changeStage(sponsor, status)}
-                    sponsor={sponsor}
-                  />
-                ))}
+      {sponsorsData.isSupabaseMode && sponsorsData.isLoading ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+          <p className="mt-4 text-sm font-medium text-slate-200">Loading workspace sponsors...</p>
+        </section>
+      ) : sponsorsData.isSupabaseMode && cleanSponsors.length === 0 && visibleActionError ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <Handshake className="mx-auto text-app-danger" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">Sponsors are unavailable</h2>
+          <p className="mt-2 text-sm text-app-muted">No local or demo sponsors were loaded as a fallback.</p>
+        </section>
+      ) : sponsorsData.isSupabaseMode && cleanSponsors.length === 0 ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <Handshake className="mx-auto text-app-primary" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">No sponsors yet</h2>
+          <p className="mt-2 text-sm text-app-muted">Add the first sponsor to begin building this workspace pipeline.</p>
+        </section>
+      ) : (
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1800px]:grid-cols-6">
+          {stages.map((stage) => {
+            const stageSponsors = filteredSponsors.filter((sponsor) => sponsor.status === stage);
+            const total = stageSponsors.reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
+            return (
+              <div key={stage} className="glass-panel flex min-h-[320px] min-w-0 flex-col rounded-lg p-3 sm:min-h-[460px]">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="break-words text-sm font-semibold text-white">{stage}</h2>
+                    <p className="mt-1 text-xs text-app-muted">{formatCurrency(total)}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white/[0.06] px-2.5 py-1 text-xs text-slate-300">{stageSponsors.length}</span>
+                </div>
+
+                <div className="flex flex-1 flex-col gap-3">
+                  {stageSponsors.length === 0 && <p className="rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-app-muted">No sponsors in this stage.</p>}
+                  {stageSponsors.map((sponsor) => (
+                    <SponsorCard
+                      key={sponsor.id}
+                      disabled={isSaving}
+                      onDelete={() => void deleteSponsor(sponsor)}
+                      onEdit={() => openEditModal(sponsor)}
+                      onStageChange={(status) => void changeStage(sponsor, status)}
+                      sponsor={sponsor}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </section>
+            );
+          })}
+        </section>
+      )}
 
       {isModalOpen && (
         <SponsorModal
           editing={Boolean(editingSponsorId)}
           errors={errors}
           form={form}
+          isSaving={isSaving}
           onCancel={closeModal}
           onChange={updateField}
           onSubmit={saveSponsor}
@@ -243,11 +364,13 @@ export default function Sponsors({ sponsors, setData }: SponsorsProps) {
 }
 
 function SponsorCard({
+  disabled,
   onDelete,
   onEdit,
   onStageChange,
   sponsor,
 }: {
+  disabled: boolean;
   onDelete: () => void;
   onEdit: () => void;
   onStageChange: (status: SponsorStatus) => void;
@@ -294,14 +417,14 @@ function SponsorCard({
 
       <label className="mt-3 block">
         <span className="text-[11px] uppercase tracking-[0.12em] text-app-muted">Move Stage</span>
-        <select className="dashboard-input mt-2 h-9 text-xs" onChange={(event) => onStageChange(event.target.value as SponsorStatus)} value={sponsor.status}>
+        <select className="dashboard-input mt-2 h-9 text-xs" disabled={disabled} onChange={(event) => onStageChange(event.target.value as SponsorStatus)} value={sponsor.status}>
           {stages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
         </select>
       </label>
 
       <div className="mt-3 flex flex-wrap justify-end gap-2">
-        <IconButton icon={Edit3} label="Edit" onClick={onEdit} />
-        <IconButton danger icon={Trash2} label="Delete" onClick={onDelete} />
+        <IconButton disabled={disabled} icon={Edit3} label="Edit" onClick={onEdit} />
+        <IconButton danger disabled={disabled} icon={Trash2} label="Delete" onClick={onDelete} />
       </div>
     </article>
   );
@@ -311,6 +434,7 @@ function SponsorModal({
   editing,
   errors,
   form,
+  isSaving,
   onCancel,
   onChange,
   onSubmit,
@@ -318,6 +442,7 @@ function SponsorModal({
   editing: boolean;
   errors: SponsorFormErrors;
   form: SponsorForm;
+  isSaving: boolean;
   onCancel: () => void;
   onChange: (field: keyof SponsorForm, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -330,7 +455,7 @@ function SponsorModal({
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Sponsor CRM</p>
             <h2 className="mt-1 text-xl font-semibold text-white">{editing ? "Edit Sponsor" : "Add Sponsor"}</h2>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={onCancel} type="button">
             <X size={18} />
           </button>
         </div>
@@ -367,11 +492,11 @@ function SponsorModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
-            {editing ? "Save Changes" : "Add Sponsor"}
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">
+            {isSaving ? "Saving..." : editing ? "Save Changes" : "Add Sponsor"}
           </button>
         </div>
       </form>
@@ -389,12 +514,13 @@ function Field({ children, error, label }: { children: React.ReactNode; error?: 
   );
 }
 
-function IconButton({ danger = false, icon: Icon, label, onClick }: { danger?: boolean; icon: typeof Edit3; label: string; onClick: () => void }) {
+function IconButton({ danger = false, disabled = false, icon: Icon, label, onClick }: { danger?: boolean; disabled?: boolean; icon: typeof Edit3; label: string; onClick: () => void }) {
   return (
     <button
-      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition ${
+      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
         danger ? "border-app-danger/30 bg-app-danger/10 text-red-200 hover:bg-app-danger/20" : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
       }`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -535,6 +661,25 @@ function makeSponsorPayload(form: SponsorForm): Omit<Sponsor, "id"> {
   };
 }
 
+function sponsorToWriteInput(
+  sponsor: Omit<Sponsor, "id">,
+  eventId?: string,
+): SponsorWriteInput {
+  return {
+    agreementUploaded: Boolean(sponsor.agreementUploaded),
+    companyName: sponsor.companyName,
+    contactPerson: sponsor.contactPerson,
+    email: sponsor.email ?? "",
+    eventId,
+    nextFollowUp: sponsor.nextFollowUp,
+    notes: sponsor.notes,
+    paymentReceived: Boolean(sponsor.paymentReceived),
+    phone: sponsor.phone ?? "",
+    sponsorshipAmount: sponsor.sponsorshipAmount,
+    status: sponsor.status,
+  };
+}
+
 function normalizePhoneInput(value: string) {
   const digits = value.replace(/\D/g, "");
   return digits.length > 10 ? digits.slice(-10) : digits;
@@ -542,4 +687,12 @@ function normalizePhoneInput(value: string) {
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
