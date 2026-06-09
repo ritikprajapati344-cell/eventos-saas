@@ -4,11 +4,14 @@ import { BadgeCheck, Clock, Edit3, Hammer, Plus, Trash2, WalletCards, X } from "
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { VendorsDataSource } from "../hooks/useVendorsData";
+import type { VendorWriteInput } from "../lib/vendorsRepository";
 import type { Vendor, VendorCategory } from "../types";
 import { formatCurrency } from "../utils/finance";
 
 interface VendorsProps {
   vendors: Vendor[];
+  vendorsData: VendorsDataSource;
 }
 
 type VendorPaymentStatus = Vendor["status"] | "Partial";
@@ -46,18 +49,24 @@ const statusTone: Record<VendorPaymentStatus, "green" | "amber" | "red"> = {
   Pending: "red",
 };
 
-export default function Vendors({ vendors }: VendorsProps) {
+export default function Vendors({ vendors, vendorsData }: VendorsProps) {
+  const [actionError, setActionError] = useState("");
   const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
   const [errors, setErrors] = useState<VendorFormErrors>({});
   const [form, setForm] = useState<VendorForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [vendorList, setVendorList] = useState<Vendor[]>(() => readStoredVendors() ?? vendors);
+  const [isSaving, setIsSaving] = useState(false);
+  const [vendorList, setVendorList] = useState<Vendor[]>(() => (
+    vendorsData.isSupabaseMode ? [] : readStoredVendors() ?? vendors
+  ));
 
   useEffect(() => {
+    if (vendorsData.isSupabaseMode) return;
+
     const storedVendors = readStoredVendors();
     if (storedVendors) setVendorList(storedVendors);
-  }, []);
+  }, [vendorsData.isSupabaseMode]);
 
   useEffect(() => {
     const handleGlobalSearch = (event: Event) => {
@@ -68,13 +77,17 @@ export default function Vendors({ vendors }: VendorsProps) {
     return () => window.removeEventListener("eventos:global-search", handleGlobalSearch);
   }, []);
 
-  const filteredVendors = useMemo(() => vendorList.filter((vendor) => vendorMatchesSearch(vendor, globalQuery)), [vendorList, globalQuery]);
-  const totals = useMemo(() => getVendorTotals(vendorList), [vendorList]);
+  const activeVendors = vendorsData.isSupabaseMode ? vendorsData.vendors : vendorList;
+  const filteredVendors = useMemo(() => activeVendors.filter((vendor) => vendorMatchesSearch(vendor, globalQuery)), [activeVendors, globalQuery]);
+  const totals = useMemo(() => getVendorTotals(activeVendors), [activeVendors]);
   const pendingVendors = filteredVendors.filter((vendor) => getPaymentStatus(vendor) !== "Paid");
   const paidVendors = filteredVendors.filter((vendor) => getPaymentStatus(vendor) === "Paid");
+  const visibleActionError = actionError || vendorsData.error;
   const formRemaining = Math.max(Number(form.amount || 0) - Number(form.advancePaid || 0), 0);
 
   const openAddModal = () => {
+    vendorsData.clearError();
+    setActionError("");
     setEditingVendorId(null);
     setErrors({});
     setForm(initialForm);
@@ -82,6 +95,8 @@ export default function Vendors({ vendors }: VendorsProps) {
   };
 
   const openEditModal = (vendor: Vendor) => {
+    vendorsData.clearError();
+    setActionError("");
     const isCustomCategory = !vendorCategories.includes(vendor.category as VendorCategory);
     setEditingVendorId(vendor.id);
     setErrors({});
@@ -114,7 +129,7 @@ export default function Vendors({ vendors }: VendorsProps) {
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const saveVendor = (event: FormEvent<HTMLFormElement>) => {
+  const saveVendor = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const validationErrors = validateVendorForm(form);
     if (Object.keys(validationErrors).length > 0) {
@@ -123,6 +138,31 @@ export default function Vendors({ vendors }: VendorsProps) {
     }
 
     const vendorPayload = makeVendorPayload(form);
+
+    if (vendorsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        const existingVendor = editingVendorId
+          ? activeVendors.find((vendor) => vendor.id === editingVendorId)
+          : undefined;
+        const writeInput = vendorToWriteInput(vendorPayload, form.status, existingVendor);
+
+        if (editingVendorId) {
+          await vendorsData.updateVendor(editingVendorId, writeInput);
+        } else {
+          await vendorsData.createVendor(writeInput);
+        }
+
+        closeModal();
+      } catch (saveError) {
+        setActionError(getErrorMessage(saveError, "Unable to save the vendor."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextVendors = editingVendorId
       ? vendorList.map((vendor) => (vendor.id === editingVendorId ? { ...vendor, ...vendorPayload } : vendor))
       : [{ id: `vendor-${Date.now()}`, ...vendorPayload }, ...vendorList];
@@ -132,8 +172,22 @@ export default function Vendors({ vendors }: VendorsProps) {
     closeModal();
   };
 
-  const deleteVendor = (vendor: Vendor) => {
+  const deleteVendor = async (vendor: Vendor) => {
     if (!window.confirm(`Delete vendor ${vendor.name}?`)) return;
+
+    if (vendorsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await vendorsData.deleteVendor(vendor.id);
+      } catch (deleteError) {
+        setActionError(getErrorMessage(deleteError, "Unable to delete the vendor."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextVendors = vendorList.filter((item) => item.id !== vendor.id);
     setVendorList(nextVendors);
     persistVendors(nextVendors);
@@ -145,7 +199,7 @@ export default function Vendors({ vendors }: VendorsProps) {
         title="Vendors"
         description="Vendor directory with payment tracking, pending payments and completed payment visibility."
         action={
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" onClick={openAddModal} type="button">
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={openAddModal} type="button">
             <Plus size={17} />
             Add Vendor
           </button>
@@ -159,7 +213,25 @@ export default function Vendors({ vendors }: VendorsProps) {
         <KpiCard title="Payment Health" value={`${totals.health}%`} helper="Vendor cashflow complete" icon={WalletCards} tone="primary" />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+      {visibleActionError && (
+        <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
+          {visibleActionError}
+        </div>
+      )}
+
+      {vendorsData.isSupabaseMode && vendorsData.isLoading ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+          <p className="mt-4 text-sm font-medium text-slate-200">Loading workspace vendors...</p>
+        </section>
+      ) : vendorsData.isSupabaseMode && activeVendors.length === 0 && visibleActionError ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <Hammer className="mx-auto text-app-danger" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">Vendors are unavailable</h2>
+          <p className="mt-2 text-sm text-app-muted">No local or demo vendors were loaded as a fallback.</p>
+        </section>
+      ) : (
+        <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="glass-panel overflow-hidden rounded-lg p-4">
           <h2 className="mb-3 text-base font-semibold text-white">Vendor Directory</h2>
           {filteredVendors.length === 0 ? (
@@ -198,8 +270,8 @@ export default function Vendors({ vendors }: VendorsProps) {
                         </td>
                         <td className="rounded-r-lg px-4 py-4">
                           <div className="flex justify-end gap-2">
-                            <IconButton icon={Edit3} label="Edit" onClick={() => openEditModal(vendor)} />
-                            <IconButton danger icon={Trash2} label="Delete" onClick={() => deleteVendor(vendor)} />
+                            <IconButton disabled={isSaving} icon={Edit3} label="Edit" onClick={() => openEditModal(vendor)} />
+                            <IconButton danger disabled={isSaving} icon={Trash2} label="Delete" onClick={() => void deleteVendor(vendor)} />
                           </div>
                         </td>
                       </tr>
@@ -215,13 +287,15 @@ export default function Vendors({ vendors }: VendorsProps) {
           <PaymentList title="Pending Payments" vendors={pendingVendors} />
           <PaymentList title="Completed Payments" vendors={paidVendors} />
         </div>
-      </section>
+        </section>
+      )}
 
       {isModalOpen && (
         <VendorModal
           editing={Boolean(editingVendorId)}
           errors={errors}
           form={form}
+          isSaving={isSaving}
           onCancel={closeModal}
           onChange={updateField}
           onSubmit={saveVendor}
@@ -267,6 +341,7 @@ function VendorModal({
   editing,
   errors,
   form,
+  isSaving,
   onCancel,
   onChange,
   onSubmit,
@@ -275,6 +350,7 @@ function VendorModal({
   editing: boolean;
   errors: VendorFormErrors;
   form: VendorForm;
+  isSaving: boolean;
   onCancel: () => void;
   onChange: (field: keyof VendorForm, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -288,7 +364,7 @@ function VendorModal({
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Vendor Workspace</p>
             <h2 className="mt-1 text-xl font-semibold text-white">{editing ? "Edit Vendor" : "Add Vendor"}</h2>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={onCancel} type="button">
             <X size={18} />
           </button>
         </div>
@@ -324,11 +400,11 @@ function VendorModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
-            {editing ? "Save Changes" : "Add Vendor"}
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">
+            {isSaving ? "Saving..." : editing ? "Save Changes" : "Add Vendor"}
           </button>
         </div>
       </form>
@@ -346,12 +422,25 @@ function Field({ children, error, label }: { children: React.ReactNode; error?: 
   );
 }
 
-function IconButton({ danger = false, icon: Icon, label, onClick }: { danger?: boolean; icon: typeof Edit3; label: string; onClick: () => void }) {
+function IconButton({
+  danger = false,
+  disabled = false,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  danger?: boolean;
+  disabled?: boolean;
+  icon: typeof Edit3;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
-      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition ${
+      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
         danger ? "border-app-danger/30 bg-app-danger/10 text-red-200 hover:bg-app-danger/20" : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
       }`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -455,6 +544,31 @@ function makeVendorPayload(form: VendorForm): Omit<Vendor, "id"> {
     owner: form.owner.trim() || "Ops",
     status: normalizedStatus,
   };
+}
+
+function vendorToWriteInput(
+  vendor: Omit<Vendor, "id">,
+  formStatus: VendorPaymentStatus,
+  existingVendor?: Vendor,
+): VendorWriteInput {
+  return {
+    advancePaid: vendor.advancePaid ?? 0,
+    amount: vendor.amount,
+    category: vendor.category,
+    dueDate: vendor.dueDate,
+    eventId: existingVendor?.eventId,
+    name: vendor.name,
+    owner: vendor.owner,
+    status: formStatus,
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
 
 function readStoredVendors() {
