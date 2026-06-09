@@ -1,7 +1,9 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
+import { useAuth } from "./hooks/useAuth";
 import { useEventOSData } from "./hooks/useEventOSData";
+import { useEventsData } from "./hooks/useEventsData";
 import Artists from "./pages/Artists";
 import Dashboard from "./pages/Dashboard";
 import EventDetail from "./pages/EventDetail";
@@ -24,13 +26,18 @@ export default function App() {
 }
 
 function AuthenticatedApp() {
-  const { data, setData } = useEventOSData();
+  const { workspaceId } = useAuth();
+  const { data: localData, setData } = useEventOSData();
+  const eventsData = useEventsData(workspaceId);
+  const data = eventsData.isSupabaseMode
+    ? { ...localData, events: eventsData.events }
+    : localData;
 
   return (
     <AppLayout data={data}>
       <Routes>
         <Route path="/" element={<Dashboard data={data} setData={setData} />} />
-        <Route path="/events" element={<Events data={data} setData={setData} />} />
+        <Route path="/events" element={<Events data={data} eventsData={eventsData} setData={setData} />} />
         <Route path="/events/:eventId" element={<EventDetail data={data} setData={setData} />} />
         <Route path="/sponsors" element={<Sponsors sponsors={data.sponsors} setData={setData} />} />
         <Route path="/artists" element={<Artists artists={data.artists} />} />

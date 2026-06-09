@@ -4,11 +4,14 @@ import { CalendarPlus, Clock, Copy, Edit3, MoreVertical, MapPin, RotateCcw, Tick
 import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { EventsDataSource } from "../hooks/useEventsData";
+import type { EventWriteInput } from "../lib/eventsRepository";
 import type { EventItem, EventOSData, EventStatus, EventType } from "../types";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 interface EventsProps {
   data: EventOSData;
+  eventsData: EventsDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
 }
 
@@ -48,18 +51,21 @@ const emptyForm = {
   status: "Planning",
 };
 
-export default function Events({ data, setData }: EventsProps) {
+export default function Events({ data, eventsData, setData }: EventsProps) {
   const navigate = useNavigate();
   const calendar = buildEventsCalendar(data);
   const [modalMode, setModalMode] = useState<ModalMode | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState("");
   const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const activeEvents = data.events.filter((event) => !event.archived);
   const archivedEvents = data.events.filter((event) => event.archived);
+  const visibleActionError = actionError || eventsData.error;
 
   const showToast = (message: string) => {
     setToast(message);
@@ -67,6 +73,8 @@ export default function Events({ data, setData }: EventsProps) {
   };
 
   const openCreate = () => {
+    eventsData.clearError();
+    setActionError("");
     setForm(emptyForm);
     setEditingId(null);
     setError("");
@@ -74,6 +82,8 @@ export default function Events({ data, setData }: EventsProps) {
   };
 
   const openEdit = (event: EventItem) => {
+    eventsData.clearError();
+    setActionError("");
     setOpenMenu(null);
     setEditingId(event.id);
     setForm({
@@ -100,7 +110,7 @@ export default function Events({ data, setData }: EventsProps) {
     setError("");
   };
 
-  const saveEvent = (submitEvent: FormEvent<HTMLFormElement>) => {
+  const saveEvent = async (submitEvent: FormEvent<HTMLFormElement>) => {
     submitEvent.preventDefault();
     const validationError = validateEventForm(form);
     if (validationError) {
@@ -109,6 +119,22 @@ export default function Events({ data, setData }: EventsProps) {
     }
 
     if (modalMode === "edit" && editingId) {
+      if (eventsData.isSupabaseMode) {
+        setIsSaving(true);
+        try {
+          const existingEvent = data.events.find((event) => event.id === editingId);
+          if (!existingEvent) throw new Error("The selected event no longer exists.");
+          await eventsData.updateEvent(editingId, formToEventInput(form, existingEvent));
+          closeModal();
+          showToast("Event updated successfully.");
+        } catch (saveError) {
+          setError(getErrorMessage(saveError, "Unable to update the event."));
+        } finally {
+          setIsSaving(false);
+        }
+        return;
+      }
+
       setData((current) => ({
         ...current,
         events: current.events.map((event) =>
@@ -159,6 +185,25 @@ export default function Events({ data, setData }: EventsProps) {
       files: [],
     };
 
+    if (eventsData.isSupabaseMode) {
+      setIsSaving(true);
+      try {
+        const createdEvent = await eventsData.createEvent(eventToWriteInput(newEvent));
+        setData((current) => ({
+          ...current,
+          activities: [{ id: `activity-${Date.now()}`, message: `Created event ${createdEvent.name}`, entity: "Events", time: "Just now", type: "Event" }, ...current.activities],
+        }));
+        closeModal();
+        showToast("Event created successfully.");
+        navigate(`/events/${createdEvent.id}`);
+      } catch (saveError) {
+        setError(getErrorMessage(saveError, "Unable to create the event."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setData((current) => ({
       ...current,
       events: [newEvent, ...current.events],
@@ -169,9 +214,25 @@ export default function Events({ data, setData }: EventsProps) {
     navigate(`/events/${id}`);
   };
 
-  const deleteEvent = (event: EventItem) => {
+  const deleteEvent = async (event: EventItem) => {
     setOpenMenu(null);
     if (!window.confirm(`Delete ${event.name} and all linked workspace data?`)) return;
+
+    if (eventsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await eventsData.deleteEvent(event.id);
+        setData((current) => cleanupDeletedEvent(current, event));
+        showToast("Event deleted successfully.");
+      } catch (deleteError) {
+        setActionError(getErrorMessage(deleteError, "Unable to delete the event."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setData((current) => ({
       ...current,
       events: current.events.filter((item) => item.id !== event.id),
@@ -187,8 +248,23 @@ export default function Events({ data, setData }: EventsProps) {
     showToast("Event deleted successfully.");
   };
 
-  const archiveEvent = (event: EventItem, archived: boolean) => {
+  const archiveEvent = async (event: EventItem, archived: boolean) => {
     setOpenMenu(null);
+
+    if (eventsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await eventsData.updateEvent(event.id, eventToWriteInput({ ...event, archived }));
+        showToast(archived ? "Event archived successfully." : "Event restored successfully.");
+      } catch (archiveError) {
+        setActionError(getErrorMessage(archiveError, "Unable to update the event archive status."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setData((current) => ({
       ...current,
       events: current.events.map((item) => (item.id === event.id ? { ...item, archived } : item)),
@@ -197,8 +273,36 @@ export default function Events({ data, setData }: EventsProps) {
     showToast(archived ? "Event archived successfully." : "Event restored successfully.");
   };
 
-  const duplicateEvent = (event: EventItem) => {
+  const duplicateEvent = async (event: EventItem) => {
     setOpenMenu(null);
+
+    if (eventsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        const duplicatedEvent = await eventsData.createEvent(eventToWriteInput({
+          ...event,
+          archived: false,
+          id: "",
+          name: `${event.name} Copy`,
+          progress: 0,
+          status: "Planning",
+          ticketPrice: 0,
+          ticketsSold: 0,
+        }));
+        setData((current) => ({
+          ...current,
+          activities: [{ id: `activity-${Date.now()}`, message: `Duplicated event ${event.name}`, entity: "Events", time: "Just now", type: "Event" }, ...current.activities],
+        }));
+        showToast(`Created ${duplicatedEvent.name}.`);
+      } catch (duplicateError) {
+        setActionError(getErrorMessage(duplicateError, "Unable to duplicate the event."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const newId = `event-${Date.now()}`;
     setData((current) => {
       const tickets = current.ticketCategories
@@ -243,6 +347,7 @@ export default function Events({ data, setData }: EventsProps) {
         action={
           <button
             className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500"
+            disabled={isSaving}
             onClick={openCreate}
             type="button"
           >
@@ -253,8 +358,32 @@ export default function Events({ data, setData }: EventsProps) {
       />
 
       {toast && <div className="rounded-lg border border-app-success/30 bg-app-success/12 px-4 py-3 text-sm font-medium text-green-100">{toast}</div>}
+      {visibleActionError && (
+        <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
+          {visibleActionError}
+        </div>
+      )}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1800px]:grid-cols-5">
+      {eventsData.isSupabaseMode && eventsData.isLoading ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+          <p className="mt-4 text-sm font-medium text-slate-200">Loading workspace events...</p>
+        </section>
+      ) : eventsData.isSupabaseMode && data.events.length === 0 && visibleActionError ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <CalendarPlus className="mx-auto text-app-danger" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">Events are unavailable</h2>
+          <p className="mt-2 text-sm text-app-muted">No local or demo events were loaded as a fallback.</p>
+        </section>
+      ) : eventsData.isSupabaseMode && data.events.length === 0 && !visibleActionError ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <CalendarPlus className="mx-auto text-app-primary" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">No events yet</h2>
+          <p className="mt-2 text-sm text-app-muted">Create the first event for this workspace to get started.</p>
+        </section>
+      ) : (
+        <>
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1800px]:grid-cols-5">
         {sections.map((section) => {
           const events = activeEvents.filter((event) => event.status === section.status);
           return (
@@ -282,9 +411,9 @@ export default function Events({ data, setData }: EventsProps) {
             </div>
           );
         })}
-      </section>
+          </section>
 
-      <section className="glass-panel rounded-lg p-4">
+          <section className="glass-panel rounded-lg p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-white">Archived Events</h2>
           <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs text-app-muted">{archivedEvents.length}</span>
@@ -307,9 +436,9 @@ export default function Events({ data, setData }: EventsProps) {
           ))}
           {archivedEvents.length === 0 && <p className="rounded-lg bg-white/[0.035] p-3 text-sm text-app-muted">No archived events yet.</p>}
         </div>
-      </section>
+          </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="glass-panel rounded-lg p-4">
           <h2 className="mb-4 text-base font-semibold text-white">Event Timeline</h2>
           <div className="space-y-3">
@@ -349,12 +478,15 @@ export default function Events({ data, setData }: EventsProps) {
             ))}
           </div>
         </div>
-      </section>
+          </section>
+        </>
+      )}
 
       {modalMode && (
         <EventModal
           error={error}
           form={form}
+          isSaving={isSaving}
           mode={modalMode}
           onCancel={closeModal}
           onChange={(field, value) => setForm((current) => ({ ...current, [field]: value }))}
@@ -443,6 +575,7 @@ function EventMiniCard({
 function EventModal({
   error,
   form,
+  isSaving,
   mode,
   onCancel,
   onChange,
@@ -450,6 +583,7 @@ function EventModal({
 }: {
   error: string;
   form: typeof emptyForm;
+  isSaving: boolean;
   mode: ModalMode;
   onCancel: () => void;
   onChange: (field: keyof typeof emptyForm, value: string) => void;
@@ -478,8 +612,8 @@ function EventModal({
         </div>
         {error && <p className="mt-4 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">{error}</p>}
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm text-slate-200 hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">Cancel</button>
-          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow hover:bg-blue-500 sm:w-auto" type="submit">Save Event</button>
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm text-slate-200 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">Cancel</button>
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">{isSaving ? "Saving..." : "Save Event"}</button>
         </div>
       </form>
     </div>
@@ -532,6 +666,67 @@ function validateEventForm(form: typeof emptyForm) {
     if (Number.isNaN(Number(form[field])) || Number(form[field]) < 0) return "Please enter valid non-negative numbers.";
   }
   return "";
+}
+
+function formToEventInput(form: typeof emptyForm, existingEvent: EventItem): EventWriteInput {
+  return {
+    archived: existingEvent.archived,
+    capacity: Number(form.capacity),
+    city: form.city.trim(),
+    date: form.date,
+    eventTime: form.eventTime,
+    eventType: form.eventType as EventType,
+    expectedExpense: Number(form.expectedExpense),
+    expectedRevenue: Number(form.expectedRevenue),
+    mainArtist: form.mainArtist.trim(),
+    name: form.name.trim(),
+    notes: existingEvent.notes,
+    owner: form.organizer.trim(),
+    status: form.status as EventStatus,
+    venue: form.venue.trim(),
+  };
+}
+
+function eventToWriteInput(event: EventItem): EventWriteInput {
+  return {
+    archived: event.archived,
+    capacity: event.capacity,
+    city: event.city,
+    date: event.date,
+    eventTime: event.eventTime,
+    eventType: event.eventType,
+    expectedExpense: event.expectedExpense,
+    expectedRevenue: event.expectedRevenue,
+    mainArtist: event.mainArtist,
+    name: event.name,
+    notes: event.notes,
+    owner: event.owner,
+    status: event.status,
+    venue: event.venue,
+  };
+}
+
+function cleanupDeletedEvent(data: EventOSData, event: EventItem): EventOSData {
+  return {
+    ...data,
+    events: data.events.filter((item) => item.id !== event.id),
+    ticketCategories: data.ticketCategories.filter((item) => item.eventId !== event.id),
+    sponsors: data.sponsors.filter((item) => item.eventId !== event.id),
+    artists: data.artists.filter((item) => item.eventId !== event.id),
+    vendors: data.vendors.filter((item) => item.eventId !== event.id),
+    expenses: data.expenses.filter((item) => item.eventId !== event.id),
+    timeline: data.timeline.filter((item) => item.eventId !== event.id),
+    tasks: data.tasks.filter((item) => item.eventId !== event.id),
+    activities: [{ id: `activity-${Date.now()}`, message: `Deleted event ${event.name}`, entity: "Events", time: "Just now", type: "Event" }, ...data.activities],
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
 
 function buildEventsCalendar(data: EventOSData) {
