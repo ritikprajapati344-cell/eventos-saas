@@ -5,6 +5,7 @@ import {
   CircleDollarSign,
   Gauge,
   LayoutDashboard,
+  LogOut,
   Mic2,
   ReceiptIndianRupee,
   Settings,
@@ -13,6 +14,8 @@ import {
   Tickets,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { useAuth } from "../hooks/useAuth";
 import type { EventItem, EventOSData } from "../types";
 
 const navigation = [
@@ -36,6 +39,18 @@ interface SidebarProps {
 export function Sidebar({ data, onNavigate }: SidebarProps) {
   const location = useLocation();
   const eventHealth = getEventHealth(data, location.pathname);
+  const { signOut, user } = useAuth();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    try {
+      await signOut();
+      onNavigate?.();
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
 
   return (
     <aside className="flex h-full flex-col overflow-y-auto border-r border-white/10 bg-slate-950/78 p-4 backdrop-blur-xl">
@@ -74,6 +89,21 @@ export function Sidebar({ data, onNavigate }: SidebarProps) {
       </nav>
 
       <EventHealthCard health={eventHealth} />
+
+      <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.04] p-2.5">
+        <p className="min-w-0 truncate px-1 text-xs text-app-muted" title={user?.email}>
+          {user?.email ?? "Authenticated user"}
+        </p>
+        <button
+          className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-slate-950/35 px-3 text-sm font-medium text-slate-200 transition hover:border-app-danger/35 hover:bg-app-danger/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={isSigningOut}
+          onClick={() => void handleSignOut()}
+          type="button"
+        >
+          <LogOut size={17} />
+          {isSigningOut ? "Signing out..." : "Sign Out"}
+        </button>
+      </div>
     </aside>
   );
 }
