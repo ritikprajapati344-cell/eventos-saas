@@ -4,11 +4,14 @@ import { Edit3, FileSignature, Hotel, Mic2, Plane, Plus, ReceiptIndianRupee, Tra
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { ArtistsDataSource } from "../hooks/useArtistsData";
+import type { ArtistWriteInput } from "../lib/artistsRepository";
 import type { Artist, ContractStatus, PaymentStatus } from "../types";
 import { formatCurrency } from "../utils/finance";
 
 interface ArtistsProps {
   artists: Artist[];
+  artistsData: ArtistsDataSource;
 }
 
 type ArtistContractStatus = ContractStatus | "Cancelled";
@@ -55,18 +58,24 @@ const contractTone: Record<ArtistContractStatus, "green" | "blue" | "red" | "sla
   "On Hold": "slate",
 };
 
-export default function Artists({ artists }: ArtistsProps) {
-  const [artistList, setArtistList] = useState<Artist[]>(() => readStoredArtists() ?? artists);
+export default function Artists({ artists, artistsData }: ArtistsProps) {
+  const [actionError, setActionError] = useState("");
+  const [artistList, setArtistList] = useState<Artist[]>(() => (
+    artistsData.isSupabaseMode ? [] : readStoredArtists() ?? artists
+  ));
   const [editingArtistId, setEditingArtistId] = useState<string | null>(null);
   const [errors, setErrors] = useState<ArtistFormErrors>({});
   const [form, setForm] = useState<ArtistForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    if (artistsData.isSupabaseMode) return;
+
     const storedArtists = readStoredArtists();
     if (storedArtists) setArtistList(storedArtists);
-  }, []);
+  }, [artistsData.isSupabaseMode]);
 
   useEffect(() => {
     const handleGlobalSearch = (event: Event) => {
@@ -77,8 +86,10 @@ export default function Artists({ artists }: ArtistsProps) {
     return () => window.removeEventListener("eventos:global-search", handleGlobalSearch);
   }, []);
 
-  const filteredArtists = useMemo(() => artistList.filter((artist) => artistMatchesSearch(artist, globalQuery)), [artistList, globalQuery]);
-  const totals = useMemo(() => getArtistTotals(artistList), [artistList]);
+  const activeArtists = artistsData.isSupabaseMode ? artistsData.artists : artistList;
+  const filteredArtists = useMemo(() => activeArtists.filter((artist) => artistMatchesSearch(artist, globalQuery)), [activeArtists, globalQuery]);
+  const totals = useMemo(() => getArtistTotals(activeArtists), [activeArtists]);
+  const visibleActionError = actionError || artistsData.error;
   const formTotal = getArtistTotal({
     fee: Number(form.fee || 0),
     travelCost: Number(form.travelCost || 0),
@@ -86,6 +97,8 @@ export default function Artists({ artists }: ArtistsProps) {
   });
 
   const openAddModal = () => {
+    artistsData.clearError();
+    setActionError("");
     setEditingArtistId(null);
     setErrors({});
     setForm(initialForm);
@@ -93,6 +106,8 @@ export default function Artists({ artists }: ArtistsProps) {
   };
 
   const openEditModal = (artist: Artist) => {
+    artistsData.clearError();
+    setActionError("");
     setEditingArtistId(artist.id);
     setErrors({});
     setForm({
@@ -120,7 +135,7 @@ export default function Artists({ artists }: ArtistsProps) {
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const saveArtist = (event: FormEvent<HTMLFormElement>) => {
+  const saveArtist = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const validationErrors = validateArtistForm(form);
     if (Object.keys(validationErrors).length > 0) {
@@ -129,6 +144,30 @@ export default function Artists({ artists }: ArtistsProps) {
     }
 
     const artistPayload = makeArtistPayload(form);
+
+    if (artistsData.isSupabaseMode) {
+      setIsSaving(true);
+      try {
+        const existingArtist = editingArtistId
+          ? activeArtists.find((artist) => artist.id === editingArtistId)
+          : undefined;
+        const writeInput = artistToWriteInput(artistPayload, existingArtist);
+
+        if (editingArtistId) {
+          await artistsData.updateArtist(editingArtistId, writeInput);
+        } else {
+          await artistsData.createArtist(writeInput);
+        }
+
+        closeModal();
+      } catch (saveError) {
+        setActionError(getErrorMessage(saveError, "Unable to save the artist."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextArtists = editingArtistId
       ? artistList.map((artist) => (artist.id === editingArtistId ? { ...artist, ...artistPayload } : artist))
       : [{ id: `artist-${Date.now()}`, ...artistPayload }, ...artistList];
@@ -138,14 +177,41 @@ export default function Artists({ artists }: ArtistsProps) {
     closeModal();
   };
 
-  const deleteArtist = (artist: Artist) => {
+  const deleteArtist = async (artist: Artist) => {
     if (!window.confirm(`Delete artist ${artist.name}?`)) return;
+
+    if (artistsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await artistsData.deleteArtist(artist.id);
+      } catch (deleteError) {
+        setActionError(getErrorMessage(deleteError, "Unable to delete the artist."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextArtists = artistList.filter((item) => item.id !== artist.id);
     setArtistList(nextArtists);
     persistArtists(nextArtists);
   };
 
-  const updateContractStatus = (artist: Artist, contractStatus: ArtistContractStatus) => {
+  const updateContractStatus = async (artist: Artist, contractStatus: ArtistContractStatus) => {
+    if (artistsData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await artistsData.changeContractStatus(artist.id, contractStatus);
+      } catch (contractError) {
+        setActionError(getErrorMessage(contractError, "Unable to change the contract status."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextArtists = artistList.map((item) => (item.id === artist.id ? { ...item, contractStatus: contractStatus as ContractStatus } : item));
     setArtistList(nextArtists);
     persistArtists(nextArtists);
@@ -157,7 +223,7 @@ export default function Artists({ artists }: ArtistsProps) {
         title="Artists"
         description="Artist profiles with performance fee, travel, hotel and contract status in one operational view."
         action={
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" onClick={openAddModal} type="button">
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={openAddModal} type="button">
             <Plus size={17} />
             Add Artist
           </button>
@@ -171,7 +237,25 @@ export default function Artists({ artists }: ArtistsProps) {
         <KpiCard title="Hotel Cost" value={formatCurrency(totals.hotel)} helper="Rooms and hospitality" icon={Hotel} tone="danger" />
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+      {visibleActionError && (
+        <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
+          {visibleActionError}
+        </div>
+      )}
+
+      {artistsData.isSupabaseMode && artistsData.isLoading ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+          <p className="mt-4 text-sm font-medium text-slate-200">Loading workspace artists...</p>
+        </section>
+      ) : artistsData.isSupabaseMode && activeArtists.length === 0 && visibleActionError ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <Mic2 className="mx-auto text-app-danger" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">Artists are unavailable</h2>
+          <p className="mt-2 text-sm text-app-muted">No local or demo artists were loaded as a fallback.</p>
+        </section>
+      ) : (
+        <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {filteredArtists.length === 0 && (
           <div className="glass-panel rounded-lg p-5 text-sm text-app-muted md:col-span-2 2xl:col-span-3">
             No artists added yet.
@@ -205,7 +289,7 @@ export default function Artists({ artists }: ArtistsProps) {
                     Contract Status
                   </span>
                   <div className="flex flex-col items-stretch gap-2 min-[430px]:flex-row min-[430px]:items-center">
-                    <select className="dashboard-input h-9 text-xs" onChange={(event) => updateContractStatus(artist, event.target.value as ArtistContractStatus)} value={contractStatus}>
+                    <select className="dashboard-input h-9 text-xs" disabled={isSaving} onChange={(event) => void updateContractStatus(artist, event.target.value as ArtistContractStatus)} value={contractStatus}>
                       {contractOptions.map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
                     <StatusBadge label={contractStatus} tone={contractTone[contractStatus]} />
@@ -214,19 +298,21 @@ export default function Artists({ artists }: ArtistsProps) {
               </div>
 
               <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <IconButton icon={Edit3} label="Edit" onClick={() => openEditModal(artist)} />
-                <IconButton danger icon={Trash2} label="Delete" onClick={() => deleteArtist(artist)} />
+                <IconButton disabled={isSaving} icon={Edit3} label="Edit" onClick={() => openEditModal(artist)} />
+                <IconButton danger disabled={isSaving} icon={Trash2} label="Delete" onClick={() => void deleteArtist(artist)} />
               </div>
             </article>
           );
         })}
-      </section>
+        </section>
+      )}
 
       {isModalOpen && (
         <ArtistModal
           editing={Boolean(editingArtistId)}
           errors={errors}
           form={form}
+          isSaving={isSaving}
           onCancel={closeModal}
           onChange={updateField}
           onSubmit={saveArtist}
@@ -241,6 +327,7 @@ function ArtistModal({
   editing,
   errors,
   form,
+  isSaving,
   onCancel,
   onChange,
   onSubmit,
@@ -249,6 +336,7 @@ function ArtistModal({
   editing: boolean;
   errors: ArtistFormErrors;
   form: ArtistForm;
+  isSaving: boolean;
   onCancel: () => void;
   onChange: (field: keyof ArtistForm, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -262,7 +350,7 @@ function ArtistModal({
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Artist Workspace</p>
             <h2 className="mt-1 text-xl font-semibold text-white">{editing ? "Edit Artist" : "Add Artist"}</h2>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={onCancel} type="button">
             <X size={18} />
           </button>
         </div>
@@ -297,11 +385,11 @@ function ArtistModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
-            {editing ? "Save Changes" : "Add Artist"}
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">
+            {isSaving ? "Saving..." : editing ? "Save Changes" : "Add Artist"}
           </button>
         </div>
       </form>
@@ -319,12 +407,25 @@ function Field({ children, error, label }: { children: React.ReactNode; error?: 
   );
 }
 
-function IconButton({ danger = false, icon: Icon, label, onClick }: { danger?: boolean; icon: typeof Edit3; label: string; onClick: () => void }) {
+function IconButton({
+  danger = false,
+  disabled = false,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  danger?: boolean;
+  disabled?: boolean;
+  icon: typeof Edit3;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
-      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition ${
+      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
         danger ? "border-app-danger/30 bg-app-danger/10 text-red-200 hover:bg-app-danger/20" : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
       }`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -400,8 +501,32 @@ function makeArtistPayload(form: ArtistForm): Omit<Artist, "id"> {
   };
 }
 
+function artistToWriteInput(artist: Omit<Artist, "id">, existingArtist?: Artist): ArtistWriteInput {
+  return {
+    contractStatus: normalizeContractStatus(artist.contractStatus),
+    eventId: existingArtist?.eventId,
+    fee: artist.fee,
+    greenRoomCost: existingArtist?.greenRoomCost ?? artist.greenRoomCost ?? 0,
+    hotelCost: artist.hotelCost,
+    name: artist.name,
+    paymentStatus: artist.paymentStatus,
+    performanceSlot: artist.performanceSlot,
+    profile: artist.profile,
+    technicalRiderStatus: existingArtist?.technicalRiderStatus ?? artist.technicalRiderStatus ?? "Pending",
+    travelCost: artist.travelCost,
+  };
+}
+
 function normalizeContractStatus(status: ContractStatus): ArtistContractStatus {
   return status === "On Hold" ? "Draft" : (status as ArtistContractStatus);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
 
 function readStoredArtists() {

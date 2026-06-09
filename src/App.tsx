@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
+import { useArtistsData } from "./hooks/useArtistsData";
 import { useAuth } from "./hooks/useAuth";
 import { useEventOSData } from "./hooks/useEventOSData";
 import { useEventsData } from "./hooks/useEventsData";
@@ -31,9 +32,11 @@ function AuthenticatedApp() {
   const { data: localData, setData } = useEventOSData();
   const eventsData = useEventsData(workspaceId);
   const sponsorsData = useSponsorsData(workspaceId);
-  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode
+  const artistsData = useArtistsData(workspaceId);
+  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode
     ? {
         ...localData,
+        artists: artistsData.isSupabaseMode ? artistsData.artists : localData.artists,
         events: eventsData.isSupabaseMode ? eventsData.events : localData.events,
         sponsors: sponsorsData.isSupabaseMode ? sponsorsData.sponsors : localData.sponsors,
       }
@@ -46,7 +49,7 @@ function AuthenticatedApp() {
         <Route path="/events" element={<Events data={data} eventsData={eventsData} setData={setData} />} />
         <Route path="/events/:eventId" element={<EventDetail data={data} setData={setData} />} />
         <Route path="/sponsors" element={<Sponsors sponsors={data.sponsors} sponsorsData={sponsorsData} setData={setData} />} />
-        <Route path="/artists" element={<Artists artists={data.artists} />} />
+        <Route path="/artists" element={<Artists artists={data.artists} artistsData={artistsData} />} />
         <Route path="/vendors" element={<Vendors vendors={data.vendors} />} />
         <Route path="/ticketing" element={<Ticketing data={data} />} />
         <Route path="/finance" element={<Finance data={data} />} />
