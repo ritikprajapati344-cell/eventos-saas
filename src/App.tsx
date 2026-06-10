@@ -9,6 +9,7 @@ import { useEventOSData } from "./hooks/useEventOSData";
 import { useEventsData } from "./hooks/useEventsData";
 import { useSettingsData } from "./hooks/useSettingsData";
 import { useSponsorsData } from "./hooks/useSponsorsData";
+import { useTasksData } from "./hooks/useTasksData";
 import { useTicketingData } from "./hooks/useTicketingData";
 import { useVendorsData } from "./hooks/useVendorsData";
 import Artists from "./pages/Artists";
@@ -43,13 +44,15 @@ function AuthenticatedApp() {
   const expensesData = useExpensesData(workspaceId);
   const financeData = useFinanceData(workspaceId);
   const settingsData = useSettingsData(workspaceId);
-  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode
+  const tasksData = useTasksData(workspaceId);
+  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode || tasksData.isSupabaseMode
     ? {
         ...localData,
         artists: artistsData.isSupabaseMode ? artistsData.artists : localData.artists,
         events: eventsData.isSupabaseMode ? eventsData.events : localData.events,
         expenses: expensesData.isSupabaseMode ? expensesData.expenses : localData.expenses,
         sponsors: sponsorsData.isSupabaseMode ? sponsorsData.sponsors : localData.sponsors,
+        tasks: tasksData.isSupabaseMode ? tasksData.tasks : localData.tasks,
         ticketCategories: ticketingData.isSupabaseMode ? ticketingData.ticketCategories : localData.ticketCategories,
         vendors: vendorsData.isSupabaseMode ? vendorsData.vendors : localData.vendors,
       }
@@ -70,6 +73,7 @@ function AuthenticatedApp() {
               expensesData={expensesData}
               setData={setData}
               sponsorsData={sponsorsData}
+              tasksData={tasksData}
               ticketingData={ticketingData}
               vendorsData={vendorsData}
             />

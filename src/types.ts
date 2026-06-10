@@ -116,6 +116,7 @@ export interface TicketCategory {
 }
 
 export interface Task {
+  completedAt?: string;
   id: string;
   title: string;
   eventId: string;

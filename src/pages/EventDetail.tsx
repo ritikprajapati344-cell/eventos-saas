@@ -43,6 +43,7 @@ import type { ArtistsDataSource } from "../hooks/useArtistsData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { ExpensesDataSource } from "../hooks/useExpensesData";
 import type { SponsorsDataSource } from "../hooks/useSponsorsData";
+import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
 import type { VendorsDataSource } from "../hooks/useVendorsData";
 import type { ExpenseRecord } from "../lib/expensesRepository";
@@ -67,6 +68,7 @@ interface EventDetailProps {
   expensesData: ExpensesDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
   sponsorsData: SponsorsDataSource;
+  tasksData: TasksDataSource;
   ticketingData: TicketingDataSource;
   vendorsData: VendorsDataSource;
 }
@@ -125,6 +127,7 @@ export default function EventDetail({
   expensesData,
   setData,
   sponsorsData,
+  tasksData,
   ticketingData,
   vendorsData,
 }: EventDetailProps) {
@@ -241,6 +244,7 @@ export default function EventDetail({
           group,
           scoped,
           sponsorsData,
+          tasksData,
           ticketingData,
           vendorsData,
         });
@@ -277,6 +281,7 @@ export default function EventDetail({
           artistsData,
           expensesData,
           sponsorsData,
+          tasksData,
           vendorsData,
         });
       } catch (deleteError) {
@@ -291,7 +296,17 @@ export default function EventDetail({
     setError("");
   };
 
-  const completeTask = (taskId: string) => {
+  const completeTask = async (taskId: string) => {
+    if (tasksData.isSupabaseMode) {
+      try {
+        await tasksData.completeTask(taskId);
+        setError("");
+      } catch (completeError) {
+        setError(getErrorMessage(completeError, "Unable to complete the task in Supabase."));
+      }
+      return;
+    }
+
     setData((current) => ({
       ...current,
       tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, status: "Done" as TaskStatus } : task)),
@@ -997,7 +1012,7 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type CloudReadyGroup = "ticket" | "sponsor" | "artist" | "vendor" | "expense";
+type CloudReadyGroup = "ticket" | "sponsor" | "artist" | "vendor" | "expense" | "task";
 type CloudReadyDeleteGroup = Exclude<CloudReadyGroup, "ticket">;
 
 interface SupabaseSaveContext {
@@ -1009,6 +1024,7 @@ interface SupabaseSaveContext {
   group: CloudReadyGroup;
   scoped: ReturnType<typeof calculateEventWorkspace>;
   sponsorsData: SponsorsDataSource;
+  tasksData: TasksDataSource;
   ticketingData: TicketingDataSource;
   vendorsData: VendorsDataSource;
 }
@@ -1017,15 +1033,16 @@ interface SupabaseDeleteContext {
   artistsData: ArtistsDataSource;
   expensesData: ExpensesDataSource;
   sponsorsData: SponsorsDataSource;
+  tasksData: TasksDataSource;
   vendorsData: VendorsDataSource;
 }
 
 function isCloudReadyGroup(group: FormGroup): group is CloudReadyGroup {
-  return ["ticket", "sponsor", "artist", "vendor", "expense"].includes(group);
+  return ["ticket", "sponsor", "artist", "vendor", "expense", "task"].includes(group);
 }
 
 function isCloudReadyDeleteGroup(group: FormGroup): group is CloudReadyDeleteGroup {
-  return ["sponsor", "artist", "vendor", "expense"].includes(group);
+  return ["sponsor", "artist", "vendor", "expense", "task"].includes(group);
 }
 
 async function saveSupabaseGroup(context: SupabaseSaveContext) {
@@ -1038,6 +1055,7 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
     group,
     scoped,
     sponsorsData,
+    tasksData,
     ticketingData,
     vendorsData,
   } = context;
@@ -1139,24 +1157,42 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
     return;
   }
 
-  const existingExpense = editId
-    ? scoped.expenses.find((expense) => expense.id === editId) as ExpenseRecord | undefined
-    : undefined;
+  if (group === "expense") {
+    const existingExpense = editId
+      ? scoped.expenses.find((expense) => expense.id === editId) as ExpenseRecord | undefined
+      : undefined;
+    const input = {
+      amount: Number(form.amount),
+      category: form.category as ExpenseCategory,
+      date: form.date,
+      description: form.description.trim(),
+      eventId: existingExpense?.eventId ?? eventId,
+      notes: existingExpense?.notes ?? "",
+      paymentStatus: existingExpense?.paymentStatus ?? "Paid",
+      vendorId: existingExpense?.vendorId,
+    };
+
+    if (editId) {
+      await expensesData.updateExpense(editId, input);
+    } else {
+      await expensesData.createExpense(input);
+    }
+    return;
+  }
+
   const input = {
-    amount: Number(form.amount),
-    category: form.category as ExpenseCategory,
-    date: form.date,
-    description: form.description.trim(),
-    eventId: existingExpense?.eventId ?? eventId,
-    notes: existingExpense?.notes ?? "",
-    paymentStatus: existingExpense?.paymentStatus ?? "Paid",
-    vendorId: existingExpense?.vendorId,
+    dueDate: form.dueDate,
+    eventId,
+    owner: form.owner.trim(),
+    priority: form.priority as TaskPriority,
+    status: form.status as TaskStatus,
+    title: form.title.trim(),
   };
 
   if (editId) {
-    await expensesData.updateExpense(editId, input);
+    await tasksData.updateTask(editId, input);
   } else {
-    await expensesData.createExpense(input);
+    await tasksData.createTask(input);
   }
 }
 
@@ -1177,7 +1213,11 @@ async function deleteSupabaseItem(
     await context.vendorsData.deleteVendor(id);
     return;
   }
-  await context.expensesData.deleteExpense(id);
+  if (group === "expense") {
+    await context.expensesData.deleteExpense(id);
+    return;
+  }
+  await context.tasksData.deleteTask(id);
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
