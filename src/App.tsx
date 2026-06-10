@@ -6,6 +6,7 @@ import { useAuth } from "./hooks/useAuth";
 import { useEventOSData } from "./hooks/useEventOSData";
 import { useEventsData } from "./hooks/useEventsData";
 import { useSponsorsData } from "./hooks/useSponsorsData";
+import { useTicketingData } from "./hooks/useTicketingData";
 import { useVendorsData } from "./hooks/useVendorsData";
 import Artists from "./pages/Artists";
 import Dashboard from "./pages/Dashboard";
@@ -35,12 +36,14 @@ function AuthenticatedApp() {
   const sponsorsData = useSponsorsData(workspaceId);
   const artistsData = useArtistsData(workspaceId);
   const vendorsData = useVendorsData(workspaceId);
-  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode
+  const ticketingData = useTicketingData(workspaceId);
+  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode
     ? {
         ...localData,
         artists: artistsData.isSupabaseMode ? artistsData.artists : localData.artists,
         events: eventsData.isSupabaseMode ? eventsData.events : localData.events,
         sponsors: sponsorsData.isSupabaseMode ? sponsorsData.sponsors : localData.sponsors,
+        ticketCategories: ticketingData.isSupabaseMode ? ticketingData.ticketCategories : localData.ticketCategories,
         vendors: vendorsData.isSupabaseMode ? vendorsData.vendors : localData.vendors,
       }
     : localData;
@@ -54,7 +57,7 @@ function AuthenticatedApp() {
         <Route path="/sponsors" element={<Sponsors sponsors={data.sponsors} sponsorsData={sponsorsData} setData={setData} />} />
         <Route path="/artists" element={<Artists artists={data.artists} artistsData={artistsData} />} />
         <Route path="/vendors" element={<Vendors vendors={data.vendors} vendorsData={vendorsData} />} />
-        <Route path="/ticketing" element={<Ticketing data={data} />} />
+        <Route path="/ticketing" element={<Ticketing data={data} ticketingData={ticketingData} />} />
         <Route path="/finance" element={<Finance data={data} />} />
         <Route path="/expenses" element={<Expenses data={data} />} />
         <Route path="/reports" element={<Reports data={data} />} />

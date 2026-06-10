@@ -1,16 +1,19 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { BadgeCheck, CircleDollarSign, DoorOpen, Edit3, Star, Ticket, Tickets, X } from "lucide-react";
+import { BadgeCheck, CircleDollarSign, DoorOpen, Edit3, Plus, Star, Ticket, Tickets, Trash2, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { TicketingDataSource } from "../hooks/useTicketingData";
+import type { TicketCategoryWriteInput } from "../lib/ticketCategoriesRepository";
 import type { EventOSData, TicketCategory } from "../types";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 interface TicketingProps {
   data: EventOSData;
+  ticketingData: TicketingDataSource;
 }
 
 type TicketDisplayStatus = "Not Started" | "Active" | "Low Stock" | "Sold Out";
@@ -23,7 +26,26 @@ type TicketEditorForm = {
 
 type TicketEditorErrors = Partial<Record<keyof TicketEditorForm, string>>;
 
+type TicketCreateForm = {
+  checkedIn: string;
+  eventId: string;
+  inventory: string;
+  name: string;
+  price: string;
+  sold: string;
+};
+
+type TicketCreateErrors = Partial<Record<keyof TicketCreateForm, string>>;
+
 const STORAGE_KEY = "eventos-demo-data-v2";
+const initialCreateForm: TicketCreateForm = {
+  checkedIn: "0",
+  eventId: "",
+  inventory: "",
+  name: "",
+  price: "",
+  sold: "0",
+};
 
 const tooltipStyle = {
   background: "#0F172A",
@@ -32,17 +54,26 @@ const tooltipStyle = {
   color: "#E5EEF9",
 };
 
-export default function Ticketing({ data }: TicketingProps) {
+export default function Ticketing({ data, ticketingData }: TicketingProps) {
+  const [actionError, setActionError] = useState("");
+  const [createErrors, setCreateErrors] = useState<TicketCreateErrors>({});
+  const [createForm, setCreateForm] = useState<TicketCreateForm>(initialCreateForm);
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
   const [errors, setErrors] = useState<TicketEditorErrors>({});
   const [form, setForm] = useState<TicketEditorForm>({ additionalSold: "0", inventory: "", price: "" });
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
-  const [ticketList, setTicketList] = useState<TicketCategory[]>(() => readStoredTickets() ?? data.ticketCategories);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [ticketList, setTicketList] = useState<TicketCategory[]>(() => (
+    ticketingData.isSupabaseMode ? [] : readStoredTickets() ?? data.ticketCategories
+  ));
 
   useEffect(() => {
+    if (ticketingData.isSupabaseMode) return;
+
     const storedTickets = readStoredTickets();
     if (storedTickets) setTicketList(storedTickets);
-  }, []);
+  }, [ticketingData.isSupabaseMode]);
 
   useEffect(() => {
     const handleGlobalSearch = (event: Event) => {
@@ -53,13 +84,17 @@ export default function Ticketing({ data }: TicketingProps) {
     return () => window.removeEventListener("eventos:global-search", handleGlobalSearch);
   }, []);
 
-  const totals = useMemo(() => getTicketTotals(ticketList), [ticketList]);
-  const filteredTickets = useMemo(() => ticketList.filter((ticket) => ticketMatchesSearch(ticket, globalQuery)), [ticketList, globalQuery]);
+  const activeTickets = ticketingData.isSupabaseMode ? ticketingData.ticketCategories : ticketList;
+  const totals = useMemo(() => getTicketTotals(activeTickets), [activeTickets]);
+  const filteredTickets = useMemo(() => activeTickets.filter((ticket) => ticketMatchesSearch(ticket, globalQuery)), [activeTickets, globalQuery]);
   const chartData = filteredTickets.map((ticket) => ({ name: ticket.name, sold: ticket.sold, available: getAvailable(ticket) }));
-  const bestSeller = getBestSellingCategory(ticketList);
-  const editingTicket = ticketList.find((ticket) => ticket.id === editingTicketId);
+  const bestSeller = getBestSellingCategory(activeTickets);
+  const editingTicket = activeTickets.find((ticket) => ticket.id === editingTicketId);
+  const visibleActionError = actionError || ticketingData.error;
 
   const openEditor = (ticket: TicketCategory) => {
+    ticketingData.clearError();
+    setActionError("");
     setEditingTicketId(ticket.id);
     setErrors({});
     setForm({
@@ -80,7 +115,50 @@ export default function Ticketing({ data }: TicketingProps) {
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const saveTicket = (event: FormEvent<HTMLFormElement>) => {
+  const openCreate = () => {
+    ticketingData.clearError();
+    setActionError("");
+    if (data.events.length === 0) {
+      setActionError("Create an event before adding a ticket category.");
+      return;
+    }
+    setCreateErrors({});
+    setCreateForm({ ...initialCreateForm, eventId: data.events[0]?.id ?? "" });
+    setIsCreateOpen(true);
+  };
+
+  const closeCreate = () => {
+    setCreateErrors({});
+    setCreateForm(initialCreateForm);
+    setIsCreateOpen(false);
+  };
+
+  const updateCreateField = (field: keyof TicketCreateForm, value: string) => {
+    setCreateForm((current) => ({ ...current, [field]: value }));
+    setCreateErrors((current) => ({ ...current, [field]: undefined }));
+  };
+
+  const createTicketCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const validationErrors = validateTicketCreateForm(createForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setCreateErrors(validationErrors);
+      return;
+    }
+
+    setIsSaving(true);
+    setActionError("");
+    try {
+      await ticketingData.createTicketCategory(createFormToWriteInput(createForm));
+      closeCreate();
+    } catch (createError) {
+      setActionError(getErrorMessage(createError, "Unable to create the ticket category."));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveTicket = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingTicket) return;
 
@@ -93,6 +171,28 @@ export default function Ticketing({ data }: TicketingProps) {
     const inventory = Number(form.inventory);
     const additionalSold = Number(form.additionalSold || 0);
     const sold = editingTicket.sold + additionalSold;
+
+    if (ticketingData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await ticketingData.updateTicketCategory(editingTicket.id, {
+          checkedIn: Math.min(editingTicket.checkedIn, sold),
+          eventId: editingTicket.eventId,
+          inventory,
+          name: editingTicket.name,
+          price: Number(form.price),
+          sold,
+        });
+        closeEditor();
+      } catch (saveError) {
+        setActionError(getErrorMessage(saveError, "Unable to update the ticket category."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextTickets = ticketList.map((ticket) =>
       ticket.id === editingTicket.id
         ? {
@@ -110,11 +210,64 @@ export default function Ticketing({ data }: TicketingProps) {
     closeEditor();
   };
 
+  const deleteTicketCategory = async (ticket: TicketCategory) => {
+    if (!window.confirm(`Delete ticket category ${ticket.name}?`)) return;
+
+    setIsSaving(true);
+    setActionError("");
+    try {
+      await ticketingData.deleteTicketCategory(ticket.id);
+    } catch (deleteError) {
+      setActionError(getErrorMessage(deleteError, "Unable to delete the ticket category."));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <PageHeader title="Ticketing" description="Ticket categories, inventory, sold count, available tickets, revenue tracking and check-in status." />
+      <PageHeader
+        title="Ticketing"
+        description="Ticket categories, inventory, sold count, available tickets, revenue tracking and check-in status."
+        action={ticketingData.isSupabaseMode ? (
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isSaving || data.events.length === 0}
+            onClick={openCreate}
+            type="button"
+          >
+            <Plus size={17} />
+            Add Ticket Category
+          </button>
+        ) : undefined}
+      />
 
-      <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {visibleActionError && (
+        <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
+          {visibleActionError}
+        </div>
+      )}
+
+      {ticketingData.isSupabaseMode && data.events.length === 0 && !ticketingData.isLoading && (
+        <div className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-4 py-3 text-sm text-amber-100">
+          Create an event before adding a ticket category.
+        </div>
+      )}
+
+      {ticketingData.isSupabaseMode && ticketingData.isLoading ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+          <p className="mt-4 text-sm font-medium text-slate-200">Loading workspace ticket categories...</p>
+        </section>
+      ) : ticketingData.isSupabaseMode && activeTickets.length === 0 && visibleActionError ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <Ticket className="mx-auto text-app-danger" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">Ticket categories are unavailable</h2>
+          <p className="mt-2 text-sm text-app-muted">No local or demo ticket categories were loaded as a fallback.</p>
+        </section>
+      ) : (
+        <>
+          <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <TicketKpi title="Ticket Inventory" value={formatNumber(totals.inventory)} helper="Total configured tickets" icon={Tickets} />
         <TicketKpi title="Tickets Sold" value={formatNumber(totals.sold)} helper={`${getSellThrough(totals.sold, totals.inventory)}% sell-through`} icon={Ticket} tone="success" />
         <TicketKpi title="Available Tickets" value={formatNumber(totals.available)} helper="Remaining inventory" icon={DoorOpen} tone="warning" />
@@ -127,9 +280,9 @@ export default function Ticketing({ data }: TicketingProps) {
           tone="primary"
         />
         <TicketKpi title="Checked In" value={`${formatNumber(totals.checkedIn)} / ${formatNumber(totals.sold)}`} helper="QR scanning for V2" icon={BadgeCheck} tone="primary" />
-      </section>
+          </section>
 
-      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+          <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <ChartCard title="Ticket Sales Summary" subtitle="Sold versus available by category">
           <div className="h-[250px] sm:h-[330px]">
             {chartData.length === 0 ? (
@@ -183,11 +336,17 @@ export default function Ticketing({ data }: TicketingProps) {
                           <StatusBadge label={status} tone={getStatusTone(status)} />
                         </td>
                         <td className="rounded-r-lg px-4 py-4">
-                          <div className="flex justify-end">
-                            <button className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={() => openEditor(ticket)} type="button">
+                          <div className="flex justify-end gap-2">
+                            <button className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={() => openEditor(ticket)} type="button">
                               <Edit3 size={14} />
                               Edit
                             </button>
+                            {ticketingData.isSupabaseMode && (
+                              <button className="inline-flex h-9 items-center gap-2 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 text-xs font-medium text-red-200 transition hover:bg-app-danger/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={() => void deleteTicketCategory(ticket)} type="button">
+                                <Trash2 size={14} />
+                                Delete
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -198,16 +357,31 @@ export default function Ticketing({ data }: TicketingProps) {
             </div>
           )}
         </div>
-      </section>
+          </section>
+        </>
+      )}
 
       {editingTicket && (
         <TicketEditorModal
           errors={errors}
           form={form}
+          isSaving={isSaving}
           onCancel={closeEditor}
           onChange={updateField}
           onSubmit={saveTicket}
           ticket={editingTicket}
+        />
+      )}
+
+      {isCreateOpen && (
+        <TicketCreateModal
+          errors={createErrors}
+          events={data.events}
+          form={createForm}
+          isSaving={isSaving}
+          onCancel={closeCreate}
+          onChange={updateCreateField}
+          onSubmit={createTicketCategory}
         />
       )}
     </div>
@@ -217,6 +391,7 @@ export default function Ticketing({ data }: TicketingProps) {
 function TicketEditorModal({
   errors,
   form,
+  isSaving,
   onCancel,
   onChange,
   onSubmit,
@@ -224,6 +399,7 @@ function TicketEditorModal({
 }: {
   errors: TicketEditorErrors;
   form: TicketEditorForm;
+  isSaving: boolean;
   onCancel: () => void;
   onChange: (field: keyof TicketEditorForm, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -242,7 +418,7 @@ function TicketEditorModal({
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Ticket Category Quick Editor</p>
             <h2 className="mt-1 text-xl font-semibold text-white">{ticket.name}</h2>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={onCancel} type="button">
             <X size={18} />
           </button>
         </div>
@@ -266,11 +442,89 @@ function TicketEditorModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
-            Save Category
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">
+            {isSaving ? "Saving..." : "Save Category"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function TicketCreateModal({
+  errors,
+  events,
+  form,
+  isSaving,
+  onCancel,
+  onChange,
+  onSubmit,
+}: {
+  errors: TicketCreateErrors;
+  events: EventOSData["events"];
+  form: TicketCreateForm;
+  isSaving: boolean;
+  onCancel: () => void;
+  onChange: (field: keyof TicketCreateForm, value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const inventory = Number(form.inventory || 0);
+  const sold = Number(form.sold || 0);
+  const available = Math.max(inventory - sold, 0);
+  const revenue = sold * Number(form.price || 0);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-y-auto bg-slate-950/76 px-2 py-3 backdrop-blur-sm sm:place-items-center sm:px-4 sm:py-6">
+      <form className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-lg border border-white/10 bg-app-panel p-4 shadow-premium sm:max-h-[92vh] sm:p-5" onSubmit={onSubmit}>
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Ticketing Workspace</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">Add Ticket Category</h2>
+          </div>
+          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={onCancel} type="button">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          <Summary label="Available" value={formatNumber(available)} />
+          <Summary label="Revenue" value={formatCurrency(revenue)} />
+          <Summary label="Status" value={getTicketStatusFromValues(sold, inventory)} />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field error={errors.eventId} label="Event">
+            <select className="dashboard-input" onChange={(event) => onChange("eventId", event.target.value)} value={form.eventId}>
+              <option value="">Select event</option>
+              {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            </select>
+          </Field>
+          <Field error={errors.name} label="Category Name">
+            <input className="dashboard-input" onChange={(event) => onChange("name", event.target.value)} value={form.name} />
+          </Field>
+          <Field error={errors.price} label="Price">
+            <input className="dashboard-input" min={0} onChange={(event) => onChange("price", event.target.value)} type="number" value={form.price} />
+          </Field>
+          <Field error={errors.inventory} label="Inventory">
+            <input className="dashboard-input" min={0} onChange={(event) => onChange("inventory", event.target.value)} type="number" value={form.inventory} />
+          </Field>
+          <Field error={errors.sold} label="Sold">
+            <input className="dashboard-input" min={0} onChange={(event) => onChange("sold", event.target.value)} type="number" value={form.sold} />
+          </Field>
+          <Field error={errors.checkedIn} label="Checked In">
+            <input className="dashboard-input" min={0} onChange={(event) => onChange("checkedIn", event.target.value)} type="number" value={form.checkedIn} />
+          </Field>
+        </div>
+
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">
+            {isSaving ? "Saving..." : "Add Category"}
           </button>
         </div>
       </form>
@@ -341,10 +595,14 @@ function getTicketRevenue(ticket: TicketCategory) {
 }
 
 function getTicketStatus(ticket: TicketCategory): TicketDisplayStatus {
-  const available = getAvailable(ticket);
-  if (ticket.sold <= 0) return "Not Started";
+  return getTicketStatusFromValues(ticket.sold, ticket.inventory);
+}
+
+function getTicketStatusFromValues(sold: number, inventory: number): TicketDisplayStatus {
+  const available = Math.max(inventory - sold, 0);
+  if (sold <= 0) return "Not Started";
   if (available === 0) return "Sold Out";
-  if (available / ticket.inventory <= 0.2) return "Low Stock";
+  if (available / inventory <= 0.2) return "Low Stock";
   return "Active";
 }
 
@@ -413,6 +671,46 @@ function validateTicketForm(form: TicketEditorForm, ticket: TicketCategory) {
   if (!errors.inventory && !errors.additionalSold && finalSold > inventory) errors.additionalSold = "Sold tickets cannot exceed inventory.";
 
   return errors;
+}
+
+function validateTicketCreateForm(form: TicketCreateForm) {
+  const errors: TicketCreateErrors = {};
+  const price = Number(form.price);
+  const inventory = Number(form.inventory);
+  const sold = Number(form.sold || 0);
+  const checkedIn = Number(form.checkedIn || 0);
+
+  if (!form.eventId) errors.eventId = "Event is required.";
+  if (!form.name.trim()) errors.name = "Category name is required.";
+  if (!form.price.trim()) errors.price = "Price is required.";
+  if (form.price.trim() && (Number.isNaN(price) || price < 0)) errors.price = "Price must be 0 or more.";
+  if (!form.inventory.trim()) errors.inventory = "Inventory is required.";
+  if (form.inventory.trim() && (Number.isNaN(inventory) || inventory < 0)) errors.inventory = "Inventory must be 0 or more.";
+  if (form.sold.trim() && (Number.isNaN(sold) || sold < 0)) errors.sold = "Sold tickets must be 0 or more.";
+  if (form.checkedIn.trim() && (Number.isNaN(checkedIn) || checkedIn < 0)) errors.checkedIn = "Checked-in tickets must be 0 or more.";
+  if (!errors.inventory && !errors.sold && sold > inventory) errors.sold = "Sold tickets cannot exceed inventory.";
+  if (!errors.sold && !errors.checkedIn && checkedIn > sold) errors.checkedIn = "Checked-in tickets cannot exceed sold tickets.";
+
+  return errors;
+}
+
+function createFormToWriteInput(form: TicketCreateForm): TicketCategoryWriteInput {
+  return {
+    checkedIn: Number(form.checkedIn || 0),
+    eventId: form.eventId,
+    inventory: Number(form.inventory),
+    name: form.name.trim(),
+    price: Number(form.price),
+    sold: Number(form.sold || 0),
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
 
 function readStoredTickets() {
