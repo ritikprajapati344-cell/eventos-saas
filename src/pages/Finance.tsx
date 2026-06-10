@@ -19,25 +19,20 @@ import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTh
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { FinanceDataSource } from "../hooks/useFinanceData";
+import type {
+  FinancePaymentMode as PaymentMode,
+  FinanceTransactionRecord as FinanceTransaction,
+  FinanceTransactionSource as TransactionSource,
+  FinanceTransactionType as TransactionType,
+  FinanceTransactionWriteInput,
+} from "../lib/financeTransactionsRepository";
 import type { Artist, EventOSData, PaymentStatus, Vendor } from "../types";
 import { formatCurrency, getNetProfit, getSponsorRevenue, getTicketRevenue, getTotalExpenses, getTotalRevenue } from "../utils/finance";
 
 interface FinanceProps {
   data: EventOSData;
-}
-
-type TransactionType = "Income" | "Expense";
-type TransactionSource = "Ticket" | "Sponsor" | "Vendor" | "Artist" | "Other";
-type PaymentMode = "Cash" | "UPI" | "Bank Transfer" | "Cheque" | "Other";
-
-interface FinanceTransaction {
-  id: string;
-  amount: number;
-  date: string;
-  notes: string;
-  paymentMode: PaymentMode;
-  source: TransactionSource;
-  type: TransactionType;
+  financeData: FinanceDataSource;
 }
 
 type TransactionForm = {
@@ -73,13 +68,17 @@ const tooltipStyle = {
   color: "#E5EEF9",
 };
 
-export default function Finance({ data }: FinanceProps) {
+export default function Finance({ data, financeData }: FinanceProps) {
+  const [actionError, setActionError] = useState("");
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [errors, setErrors] = useState<TransactionErrors>({});
   const [form, setForm] = useState<TransactionForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [transactions, setTransactions] = useState<FinanceTransaction[]>(readStoredTransactions);
+  const [isSaving, setIsSaving] = useState(false);
+  const [transactions, setTransactions] = useState<FinanceTransaction[]>(() => (
+    financeData.isSupabaseMode ? [] : readStoredTransactions()
+  ));
 
   useEffect(() => {
     const handleGlobalSearch = (event: Event) => {
@@ -90,8 +89,9 @@ export default function Finance({ data }: FinanceProps) {
     return () => window.removeEventListener("eventos:global-search", handleGlobalSearch);
   }, []);
 
-  const ledgerTotals = useMemo(() => getLedgerTotals(transactions), [transactions]);
-  const filteredTransactions = useMemo(() => transactions.filter((transaction) => transactionMatchesSearch(transaction, globalQuery)), [transactions, globalQuery]);
+  const activeTransactions = financeData.isSupabaseMode ? financeData.transactions : transactions;
+  const ledgerTotals = useMemo(() => getLedgerTotals(activeTransactions), [activeTransactions]);
+  const filteredTransactions = useMemo(() => activeTransactions.filter((transaction) => transactionMatchesSearch(transaction, globalQuery)), [activeTransactions, globalQuery]);
   const ticketRevenue = getTicketRevenue(data.events, data.ticketCategories);
   const sponsorRevenue = getSponsorRevenue(data.sponsors);
   const baseRevenue = getTotalRevenue(data.events, data.sponsors, data.ticketCategories);
@@ -103,8 +103,11 @@ export default function Finance({ data }: FinanceProps) {
   const profitMargin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
   const receivables = getReceivablePayableSummary(data);
   const breakdown = getPaymentBreakdown(data);
+  const visibleActionError = actionError || financeData.error;
 
   const openAddModal = () => {
+    financeData.clearError();
+    setActionError("");
     setEditingTransactionId(null);
     setErrors({});
     setForm(initialForm);
@@ -112,6 +115,8 @@ export default function Finance({ data }: FinanceProps) {
   };
 
   const openEditModal = (transaction: FinanceTransaction) => {
+    financeData.clearError();
+    setActionError("");
     setEditingTransactionId(transaction.id);
     setErrors({});
     setForm({
@@ -137,7 +142,7 @@ export default function Finance({ data }: FinanceProps) {
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const saveTransaction = (event: FormEvent<HTMLFormElement>) => {
+  const saveTransaction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const validationErrors = validateTransaction(form);
     if (Object.keys(validationErrors).length > 0) {
@@ -146,6 +151,31 @@ export default function Finance({ data }: FinanceProps) {
     }
 
     const payload = makeTransactionPayload(form);
+
+    if (financeData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        const existingTransaction = editingTransactionId
+          ? activeTransactions.find((transaction) => transaction.id === editingTransactionId)
+          : undefined;
+        const writeInput = transactionToWriteInput(payload, existingTransaction);
+
+        if (editingTransactionId) {
+          await financeData.updateTransaction(editingTransactionId, writeInput);
+        } else {
+          await financeData.createTransaction(writeInput);
+        }
+
+        closeModal();
+      } catch (saveError) {
+        setActionError(getErrorMessage(saveError, "Unable to save the finance transaction."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextTransactions = editingTransactionId
       ? transactions.map((transaction) => (transaction.id === editingTransactionId ? { ...transaction, ...payload } : transaction))
       : [{ id: `finance-${Date.now()}`, ...payload }, ...transactions];
@@ -155,8 +185,22 @@ export default function Finance({ data }: FinanceProps) {
     closeModal();
   };
 
-  const deleteTransaction = (transaction: FinanceTransaction) => {
+  const deleteTransaction = async (transaction: FinanceTransaction) => {
     if (!window.confirm(`Delete ${transaction.type.toLowerCase()} transaction of ${formatCurrency(transaction.amount)}?`)) return;
+
+    if (financeData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await financeData.deleteTransaction(transaction.id);
+      } catch (deleteError) {
+        setActionError(getErrorMessage(deleteError, "Unable to delete the finance transaction."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextTransactions = transactions.filter((item) => item.id !== transaction.id);
     setTransactions(nextTransactions);
     persistTransactions(nextTransactions);
@@ -168,7 +212,7 @@ export default function Finance({ data }: FinanceProps) {
         title="Finance"
         description="Revenue, expenses, profit, sponsor revenue, ticket revenue and financial summary."
         action={
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" onClick={openAddModal} type="button">
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={openAddModal} type="button">
             <Plus size={17} />
             Add Transaction
           </button>
@@ -191,6 +235,12 @@ export default function Finance({ data }: FinanceProps) {
         <KpiCard title="Vendor Payable" value={formatCurrency(receivables.vendorPayable)} helper="Remaining vendor balances" icon={WalletCards} tone="danger" />
         <KpiCard title="Artist Payable" value={formatCurrency(receivables.artistPayable)} helper="Unpaid artist balances" icon={BadgeIndianRupee} tone="danger" />
       </section>
+
+      {visibleActionError && (
+        <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
+          {visibleActionError}
+        </div>
+      )}
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <ChartCard title="Financial Forecast" subtitle="Forecast and actual revenue across event planning months">
@@ -244,7 +294,17 @@ export default function Finance({ data }: FinanceProps) {
             <h2 className="text-base font-semibold text-white">Finance Ledger</h2>
             <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs text-slate-300">{filteredTransactions.length}</span>
           </div>
-          {filteredTransactions.length === 0 ? (
+          {financeData.isSupabaseMode && financeData.isLoading ? (
+            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-6 text-center">
+              <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+              <p className="mt-3 text-sm text-app-muted">Loading workspace finance transactions...</p>
+            </div>
+          ) : financeData.isSupabaseMode && visibleActionError ? (
+            <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 p-4">
+              <p className="text-sm font-medium text-red-100">Finance transactions are unavailable.</p>
+              <p className="mt-1 text-xs text-red-100/70">No local finance transactions were loaded as a fallback.</p>
+            </div>
+          ) : filteredTransactions.length === 0 ? (
             <p className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm text-app-muted">No finance transactions yet.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -273,8 +333,8 @@ export default function Finance({ data }: FinanceProps) {
                       <td className={`px-4 py-4 text-right font-semibold ${transaction.type === "Income" ? "text-app-success" : "text-app-danger"}`}>{formatCurrency(transaction.amount)}</td>
                       <td className="rounded-r-lg px-4 py-4">
                         <div className="flex justify-end gap-2">
-                          <IconButton icon={Edit3} label="Edit" onClick={() => openEditModal(transaction)} />
-                          <IconButton danger icon={Trash2} label="Delete" onClick={() => deleteTransaction(transaction)} />
+                          <IconButton disabled={isSaving} icon={Edit3} label="Edit" onClick={() => openEditModal(transaction)} />
+                          <IconButton danger disabled={isSaving} icon={Trash2} label="Delete" onClick={() => void deleteTransaction(transaction)} />
                         </div>
                       </td>
                     </tr>
@@ -291,6 +351,7 @@ export default function Finance({ data }: FinanceProps) {
           editing={Boolean(editingTransactionId)}
           errors={errors}
           form={form}
+          isSaving={isSaving}
           onCancel={closeModal}
           onChange={updateField}
           onSubmit={saveTransaction}
@@ -304,6 +365,7 @@ function TransactionModal({
   editing,
   errors,
   form,
+  isSaving,
   onCancel,
   onChange,
   onSubmit,
@@ -311,6 +373,7 @@ function TransactionModal({
   editing: boolean;
   errors: TransactionErrors;
   form: TransactionForm;
+  isSaving: boolean;
   onCancel: () => void;
   onChange: (field: keyof TransactionForm, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -323,7 +386,7 @@ function TransactionModal({
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Finance Ledger</p>
             <h2 className="mt-1 text-xl font-semibold text-white">{editing ? "Edit Transaction" : "Add Transaction"}</h2>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={onCancel} type="button">
             <X size={18} />
           </button>
         </div>
@@ -354,11 +417,11 @@ function TransactionModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
-            {editing ? "Save Changes" : "Add Transaction"}
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">
+            {isSaving ? "Saving..." : editing ? "Save Changes" : "Add Transaction"}
           </button>
         </div>
       </form>
@@ -376,12 +439,25 @@ function Field({ children, error, label }: { children: React.ReactNode; error?: 
   );
 }
 
-function IconButton({ danger = false, icon: Icon, label, onClick }: { danger?: boolean; icon: typeof Edit3; label: string; onClick: () => void }) {
+function IconButton({
+  danger = false,
+  disabled = false,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  danger?: boolean;
+  disabled?: boolean;
+  icon: typeof Edit3;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
-      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition ${
+      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
         danger ? "border-app-danger/30 bg-app-danger/10 text-red-200 hover:bg-app-danger/20" : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
       }`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -435,6 +511,29 @@ function makeTransactionPayload(form: TransactionForm): Omit<FinanceTransaction,
     source: form.source,
     type: form.type,
   };
+}
+
+function transactionToWriteInput(
+  transaction: Omit<FinanceTransaction, "id">,
+  existingTransaction?: FinanceTransaction,
+): FinanceTransactionWriteInput {
+  return {
+    amount: transaction.amount,
+    date: transaction.date,
+    eventId: existingTransaction?.eventId,
+    notes: transaction.notes,
+    paymentMode: transaction.paymentMode,
+    source: transaction.source,
+    type: transaction.type,
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
 
 function getLedgerTotals(transactions: FinanceTransaction[]) {

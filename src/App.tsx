@@ -4,6 +4,7 @@ import { AuthGate } from "./components/AuthGate";
 import { useArtistsData } from "./hooks/useArtistsData";
 import { useAuth } from "./hooks/useAuth";
 import { useExpensesData } from "./hooks/useExpensesData";
+import { useFinanceData } from "./hooks/useFinanceData";
 import { useEventOSData } from "./hooks/useEventOSData";
 import { useEventsData } from "./hooks/useEventsData";
 import { useSponsorsData } from "./hooks/useSponsorsData";
@@ -39,6 +40,7 @@ function AuthenticatedApp() {
   const vendorsData = useVendorsData(workspaceId);
   const ticketingData = useTicketingData(workspaceId);
   const expensesData = useExpensesData(workspaceId);
+  const financeData = useFinanceData(workspaceId);
   const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode
     ? {
         ...localData,
@@ -61,7 +63,7 @@ function AuthenticatedApp() {
         <Route path="/artists" element={<Artists artists={data.artists} artistsData={artistsData} />} />
         <Route path="/vendors" element={<Vendors vendors={data.vendors} vendorsData={vendorsData} />} />
         <Route path="/ticketing" element={<Ticketing data={data} ticketingData={ticketingData} />} />
-        <Route path="/finance" element={<Finance data={data} />} />
+        <Route path="/finance" element={<Finance data={data} financeData={financeData} />} />
         <Route path="/expenses" element={<Expenses data={data} expensesData={expensesData} />} />
         <Route path="/reports" element={<Reports data={data} />} />
         <Route path="/settings" element={<Settings />} />
