@@ -45,6 +45,7 @@ import type { ExpensesDataSource } from "../hooks/useExpensesData";
 import type { SponsorsDataSource } from "../hooks/useSponsorsData";
 import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
+import type { TimelineDataSource } from "../hooks/useTimelineData";
 import type { VendorsDataSource } from "../hooks/useVendorsData";
 import type { ExpenseRecord } from "../lib/expensesRepository";
 import type {
@@ -70,6 +71,7 @@ interface EventDetailProps {
   sponsorsData: SponsorsDataSource;
   tasksData: TasksDataSource;
   ticketingData: TicketingDataSource;
+  timelineData: TimelineDataSource;
   vendorsData: VendorsDataSource;
 }
 
@@ -129,6 +131,7 @@ export default function EventDetail({
   sponsorsData,
   tasksData,
   ticketingData,
+  timelineData,
   vendorsData,
 }: EventDetailProps) {
   const { eventId } = useParams();
@@ -246,6 +249,7 @@ export default function EventDetail({
           sponsorsData,
           tasksData,
           ticketingData,
+          timelineData,
           vendorsData,
         });
       } catch (saveError) {
@@ -282,6 +286,7 @@ export default function EventDetail({
           expensesData,
           sponsorsData,
           tasksData,
+          timelineData,
           vendorsData,
         });
       } catch (deleteError) {
@@ -1012,7 +1017,7 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type CloudReadyGroup = "ticket" | "sponsor" | "artist" | "vendor" | "expense" | "task";
+type CloudReadyGroup = "ticket" | "sponsor" | "artist" | "vendor" | "expense" | "task" | "timeline";
 type CloudReadyDeleteGroup = Exclude<CloudReadyGroup, "ticket">;
 
 interface SupabaseSaveContext {
@@ -1026,6 +1031,7 @@ interface SupabaseSaveContext {
   sponsorsData: SponsorsDataSource;
   tasksData: TasksDataSource;
   ticketingData: TicketingDataSource;
+  timelineData: TimelineDataSource;
   vendorsData: VendorsDataSource;
 }
 
@@ -1034,15 +1040,16 @@ interface SupabaseDeleteContext {
   expensesData: ExpensesDataSource;
   sponsorsData: SponsorsDataSource;
   tasksData: TasksDataSource;
+  timelineData: TimelineDataSource;
   vendorsData: VendorsDataSource;
 }
 
 function isCloudReadyGroup(group: FormGroup): group is CloudReadyGroup {
-  return ["ticket", "sponsor", "artist", "vendor", "expense", "task"].includes(group);
+  return ["ticket", "sponsor", "artist", "vendor", "expense", "task", "timeline"].includes(group);
 }
 
 function isCloudReadyDeleteGroup(group: FormGroup): group is CloudReadyDeleteGroup {
-  return ["sponsor", "artist", "vendor", "expense", "task"].includes(group);
+  return ["sponsor", "artist", "vendor", "expense", "task", "timeline"].includes(group);
 }
 
 async function saveSupabaseGroup(context: SupabaseSaveContext) {
@@ -1057,6 +1064,7 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
     sponsorsData,
     tasksData,
     ticketingData,
+    timelineData,
     vendorsData,
   } = context;
 
@@ -1180,19 +1188,36 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
     return;
   }
 
+  if (group === "task") {
+    const input = {
+      dueDate: form.dueDate,
+      eventId,
+      owner: form.owner.trim(),
+      priority: form.priority as TaskPriority,
+      status: form.status as TaskStatus,
+      title: form.title.trim(),
+    };
+
+    if (editId) {
+      await tasksData.updateTask(editId, input);
+    } else {
+      await tasksData.createTask(input);
+    }
+    return;
+  }
+
   const input = {
-    dueDate: form.dueDate,
+    date: form.date,
+    description: form.description.trim(),
     eventId,
-    owner: form.owner.trim(),
-    priority: form.priority as TaskPriority,
-    status: form.status as TaskStatus,
+    status: form.status as "Done" | "Active" | "Upcoming",
     title: form.title.trim(),
   };
 
   if (editId) {
-    await tasksData.updateTask(editId, input);
+    await timelineData.updateTimelineItem(editId, input);
   } else {
-    await tasksData.createTask(input);
+    await timelineData.createTimelineItem(input);
   }
 }
 
@@ -1217,7 +1242,11 @@ async function deleteSupabaseItem(
     await context.expensesData.deleteExpense(id);
     return;
   }
-  await context.tasksData.deleteTask(id);
+  if (group === "task") {
+    await context.tasksData.deleteTask(id);
+    return;
+  }
+  await context.timelineData.deleteTimelineItem(id);
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

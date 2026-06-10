@@ -11,6 +11,7 @@ import { useSettingsData } from "./hooks/useSettingsData";
 import { useSponsorsData } from "./hooks/useSponsorsData";
 import { useTasksData } from "./hooks/useTasksData";
 import { useTicketingData } from "./hooks/useTicketingData";
+import { useTimelineData } from "./hooks/useTimelineData";
 import { useVendorsData } from "./hooks/useVendorsData";
 import Artists from "./pages/Artists";
 import Dashboard from "./pages/Dashboard";
@@ -45,7 +46,8 @@ function AuthenticatedApp() {
   const financeData = useFinanceData(workspaceId);
   const settingsData = useSettingsData(workspaceId);
   const tasksData = useTasksData(workspaceId);
-  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode || tasksData.isSupabaseMode
+  const timelineData = useTimelineData(workspaceId);
+  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode || tasksData.isSupabaseMode || timelineData.isSupabaseMode
     ? {
         ...localData,
         artists: artistsData.isSupabaseMode ? artistsData.artists : localData.artists,
@@ -54,6 +56,7 @@ function AuthenticatedApp() {
         sponsors: sponsorsData.isSupabaseMode ? sponsorsData.sponsors : localData.sponsors,
         tasks: tasksData.isSupabaseMode ? tasksData.tasks : localData.tasks,
         ticketCategories: ticketingData.isSupabaseMode ? ticketingData.ticketCategories : localData.ticketCategories,
+        timeline: timelineData.isSupabaseMode ? timelineData.timeline : localData.timeline,
         vendors: vendorsData.isSupabaseMode ? vendorsData.vendors : localData.vendors,
       }
     : localData;
@@ -75,6 +78,7 @@ function AuthenticatedApp() {
               sponsorsData={sponsorsData}
               tasksData={tasksData}
               ticketingData={ticketingData}
+              timelineData={timelineData}
               vendorsData={vendorsData}
             />
           )}
