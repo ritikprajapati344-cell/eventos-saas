@@ -7,6 +7,7 @@ import { useExpensesData } from "./hooks/useExpensesData";
 import { useFinanceData } from "./hooks/useFinanceData";
 import { useEventOSData } from "./hooks/useEventOSData";
 import { useEventsData } from "./hooks/useEventsData";
+import { useSettingsData } from "./hooks/useSettingsData";
 import { useSponsorsData } from "./hooks/useSponsorsData";
 import { useTicketingData } from "./hooks/useTicketingData";
 import { useVendorsData } from "./hooks/useVendorsData";
@@ -41,6 +42,7 @@ function AuthenticatedApp() {
   const ticketingData = useTicketingData(workspaceId);
   const expensesData = useExpensesData(workspaceId);
   const financeData = useFinanceData(workspaceId);
+  const settingsData = useSettingsData(workspaceId);
   const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode
     ? {
         ...localData,
@@ -66,7 +68,7 @@ function AuthenticatedApp() {
         <Route path="/finance" element={<Finance data={data} financeData={financeData} />} />
         <Route path="/expenses" element={<Expenses data={data} expensesData={expensesData} />} />
         <Route path="/reports" element={<Reports data={data} />} />
-        <Route path="/settings" element={<Settings />} />
+        <Route path="/settings" element={<Settings settingsData={settingsData} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>

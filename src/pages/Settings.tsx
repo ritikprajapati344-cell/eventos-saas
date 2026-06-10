@@ -1,27 +1,15 @@
 import { Bell, Building2, Download, Palette, Save, SlidersHorizontal, Upload, UserRound } from "lucide-react";
 import type { ChangeEvent, ElementType, ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import type { SettingsDataSource } from "../hooks/useSettingsData";
+import type { WorkspaceSettingsWriteInput } from "../lib/workspaceSettingsRepository";
 
-type SettingsState = {
-  accentColor: string;
-  compactDashboard: boolean;
-  companyLogo: string;
-  companyName: string;
-  contactNumber: string;
-  dailyDigest: boolean;
-  darkTheme: boolean;
-  defaultCurrency: string;
-  emailAddress: string;
-  exportButtons: boolean;
-  localStorageMode: boolean;
-  organizerName: string;
-  paymentReminders: boolean;
-  profitUpdates: boolean;
-  role: string;
-  sponsorFollowUps: boolean;
-  workspaceRegion: string;
-};
+type SettingsState = WorkspaceSettingsWriteInput;
+
+interface SettingsProps {
+  settingsData: SettingsDataSource;
+}
 
 const settingsStorageKey = "eventos-settings-v1";
 const eventOSDataStorageKey = "eventos-demo-data-v2";
@@ -46,9 +34,19 @@ const defaultSettings: SettingsState = {
   workspaceRegion: "India",
 };
 
-export default function Settings() {
-  const [settings, setSettings] = useState<SettingsState>(readSettings);
+export default function Settings({ settingsData }: SettingsProps) {
+  const [settings, setSettings] = useState<SettingsState>(() => (
+    settingsData.isSupabaseMode ? defaultSettings : readSettings()
+  ));
+  const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    if (settingsData.isSupabaseMode && settingsData.settings) {
+      const { preferences: _preferences, ...remoteSettings } = settingsData.settings;
+      setSettings(remoteSettings);
+    }
+  }, [settingsData.isSupabaseMode, settingsData.settings]);
 
   const updateSetting = <K extends keyof SettingsState>(field: K, value: SettingsState[K]) => {
     setSettings((current) => ({ ...current, [field]: value }));
@@ -59,7 +57,24 @@ export default function Settings() {
     window.setTimeout(() => setToast(""), 2600);
   };
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
+    if (settingsData.isSupabaseMode) {
+      setIsSaving(true);
+      settingsData.clearError();
+      try {
+        const savedSettings = await settingsData.saveSettings(settings);
+        const { preferences: _preferences, ...remoteSettings } = savedSettings;
+        setSettings(remoteSettings);
+        window.dispatchEvent(new Event("eventos:settings-theme-updated"));
+        showToast("Settings saved successfully.");
+      } catch {
+        // The hook exposes the workspace-scoped error below.
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
     window.dispatchEvent(new Event("eventos:settings-theme-updated"));
     showToast("Settings saved successfully.");
@@ -112,16 +127,28 @@ export default function Settings() {
         title="Settings"
         description="SaaS-style workspace settings for company profile, theme, notifications and preferences."
         action={
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45" onClick={saveSettings} type="button">
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving || settingsData.isLoading} onClick={() => void saveSettings()} type="button">
             <Save size={17} />
-            Save Settings
+            {isSaving ? "Saving..." : "Save Settings"}
           </button>
         }
       />
 
       {toast && <p className="rounded-lg border border-app-success/30 bg-app-success/10 px-3 py-2 text-sm text-green-100">{toast}</p>}
+      {settingsData.isSupabaseMode && settingsData.error && (
+        <p className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">
+          {settingsData.error} No local settings were loaded as a fallback.
+        </p>
+      )}
+      {settingsData.isSupabaseMode && settingsData.isLoading && (
+        <div className="glass-panel rounded-lg p-6 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+          <p className="mt-3 text-sm text-app-muted">Loading workspace settings...</p>
+        </div>
+      )}
 
-      <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+      {!settingsData.isLoading && (
+        <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
           <h2 className="flex items-center gap-2 text-base font-semibold text-white">
             <Building2 size={19} />
@@ -183,7 +210,8 @@ export default function Settings() {
             </label>
           </SettingsPanel>
         </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }
