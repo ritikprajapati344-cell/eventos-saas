@@ -4,6 +4,7 @@ import {
   deleteWorkspaceEvent,
   listWorkspaceEvents,
   updateWorkspaceEvent,
+  updateWorkspaceEventNotes,
   type EventWriteInput,
 } from "../lib/eventsRepository";
 import { supabaseConfiguration } from "../lib/supabase";
@@ -18,6 +19,7 @@ export interface EventsDataSource {
   isLoading: boolean;
   isSupabaseMode: boolean;
   updateEvent: (eventId: string, input: EventWriteInput) => Promise<EventItem>;
+  updateEventNotes: (eventId: string, notes: string) => Promise<EventItem>;
 }
 
 export function useEventsData(workspaceId: string | null): EventsDataSource {
@@ -101,6 +103,19 @@ export function useEventsData(workspaceId: string | null): EventsDataSource {
     }
   }, [requireWorkspace]);
 
+  const updateEventNotes = useCallback(async (eventId: string, notes: string) => {
+    setError(null);
+    try {
+      const updatedEvent = await updateWorkspaceEventNotes(requireWorkspace(), eventId, notes);
+      setEvents((current) => current.map((event) => (event.id === eventId ? updatedEvent : event)));
+      return updatedEvent;
+    } catch (updateError) {
+      const message = getErrorMessage(updateError, "Unable to save event notes in Supabase.");
+      setError(message);
+      throw new Error(message);
+    }
+  }, [requireWorkspace]);
+
   const deleteEvent = useCallback(async (eventId: string) => {
     setError(null);
     try {
@@ -122,6 +137,7 @@ export function useEventsData(workspaceId: string | null): EventsDataSource {
     isLoading,
     isSupabaseMode,
     updateEvent,
+    updateEventNotes,
   };
 }
 

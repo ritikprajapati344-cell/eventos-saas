@@ -60,7 +60,21 @@ function AuthenticatedApp() {
       <Routes>
         <Route path="/" element={<Dashboard data={data} setData={setData} />} />
         <Route path="/events" element={<Events data={data} eventsData={eventsData} setData={setData} />} />
-        <Route path="/events/:eventId" element={<EventDetail data={data} setData={setData} />} />
+        <Route
+          path="/events/:eventId"
+          element={(
+            <EventDetail
+              artistsData={artistsData}
+              data={data}
+              eventsData={eventsData}
+              expensesData={expensesData}
+              setData={setData}
+              sponsorsData={sponsorsData}
+              ticketingData={ticketingData}
+              vendorsData={vendorsData}
+            />
+          )}
+        />
         <Route path="/sponsors" element={<Sponsors sponsors={data.sponsors} sponsorsData={sponsorsData} setData={setData} />} />
         <Route path="/artists" element={<Artists artists={data.artists} artistsData={artistsData} />} />
         <Route path="/vendors" element={<Vendors vendors={data.vendors} vendorsData={vendorsData} />} />

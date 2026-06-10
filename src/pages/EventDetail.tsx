@@ -1,5 +1,5 @@
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -39,6 +39,13 @@ import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { ArtistsDataSource } from "../hooks/useArtistsData";
+import type { EventsDataSource } from "../hooks/useEventsData";
+import type { ExpensesDataSource } from "../hooks/useExpensesData";
+import type { SponsorsDataSource } from "../hooks/useSponsorsData";
+import type { TicketingDataSource } from "../hooks/useTicketingData";
+import type { VendorsDataSource } from "../hooks/useVendorsData";
+import type { ExpenseRecord } from "../lib/expensesRepository";
 import type {
   CheckInStatus,
   ContractStatus,
@@ -54,8 +61,14 @@ import type {
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 interface EventDetailProps {
+  artistsData: ArtistsDataSource;
   data: EventOSData;
+  eventsData: EventsDataSource;
+  expensesData: ExpensesDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
+  sponsorsData: SponsorsDataSource;
+  ticketingData: TicketingDataSource;
+  vendorsData: VendorsDataSource;
 }
 
 type FormGroup = keyof typeof initialForms;
@@ -105,14 +118,53 @@ const tooltipStyle = {
   color: "#E5EEF9",
 };
 
-export default function EventDetail({ data, setData }: EventDetailProps) {
+export default function EventDetail({
+  artistsData,
+  data,
+  eventsData,
+  expensesData,
+  setData,
+  sponsorsData,
+  ticketingData,
+  vendorsData,
+}: EventDetailProps) {
   const { eventId } = useParams();
   const event = data.events.find((item) => item.id === eventId);
   const [forms, setForms] = useState(initialForms);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<{ group: FormGroup; id: string } | null>(null);
+  const [notesDraft, setNotesDraft] = useState(event?.notes ?? "");
+  const lastSavedNotesRef = useRef(event?.notes ?? "");
+  const notesSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const scoped = useMemo(() => (eventId ? calculateEventWorkspace(data, eventId) : null), [data, eventId]);
+
+  useEffect(() => {
+    setNotesDraft(event?.notes ?? "");
+    lastSavedNotesRef.current = event?.notes ?? "";
+  }, [event?.id]);
+
+  useEffect(() => {
+    if (!eventsData.isSupabaseMode || !eventId || !event || notesDraft === lastSavedNotesRef.current) {
+      return;
+    }
+
+    const notesToSave = notesDraft;
+    const timeoutId = window.setTimeout(() => {
+      notesSaveQueueRef.current = notesSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (notesToSave === lastSavedNotesRef.current) return;
+          await eventsData.updateEventNotes(eventId, notesToSave);
+          lastSavedNotesRef.current = notesToSave;
+        })
+        .catch((saveError: unknown) => {
+          setError(getErrorMessage(saveError, "Unable to save event notes in Supabase."));
+        });
+    }, 700);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [event?.id, eventId, eventsData.isSupabaseMode, eventsData.updateEventNotes, notesDraft]);
 
   if (!event || !eventId || !scoped) {
     return (
@@ -168,7 +220,7 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
     setError("");
   };
 
-  const saveGroup = (group: FormGroup, submitEvent: FormEvent<HTMLFormElement>) => {
+  const saveGroup = async (group: FormGroup, submitEvent: FormEvent<HTMLFormElement>) => {
     submitEvent.preventDefault();
     const validationError = validateGroup(group, forms[group], group === "ticket" ? scoped.tickets : undefined);
     if (validationError) {
@@ -176,7 +228,30 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
       return;
     }
 
-    setData((current) => applyEventUpdate(current, eventId, group, forms[group], editing?.group === group ? editing.id : undefined));
+    const editId = editing?.group === group ? editing.id : undefined;
+
+    if (isCloudReadyGroup(group) && eventsData.isSupabaseMode) {
+      try {
+        await saveSupabaseGroup({
+          artistsData,
+          editId,
+          eventId,
+          expensesData,
+          form: forms[group],
+          group,
+          scoped,
+          sponsorsData,
+          ticketingData,
+          vendorsData,
+        });
+      } catch (saveError) {
+        setError(getErrorMessage(saveError, `Unable to save ${group} in Supabase.`));
+        return;
+      }
+    } else {
+      setData((current) => applyEventUpdate(current, eventId, group, forms[group], editId));
+    }
+
     setForms((current) => ({ ...current, [group]: initialForms[group] }));
     setEditing(null);
     setError("");
@@ -195,9 +270,25 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
     setError("");
   };
 
-  const deleteItem = (group: FormGroup, id: string) => {
-    setData((current) => deleteEventItem(current, eventId, group, id));
+  const deleteItem = async (group: FormGroup, id: string) => {
+    if (isCloudReadyDeleteGroup(group) && eventsData.isSupabaseMode) {
+      try {
+        await deleteSupabaseItem(group, id, {
+          artistsData,
+          expensesData,
+          sponsorsData,
+          vendorsData,
+        });
+      } catch (deleteError) {
+        setError(getErrorMessage(deleteError, `Unable to delete ${group} from Supabase.`));
+        return;
+      }
+    } else {
+      setData((current) => deleteEventItem(current, eventId, group, id));
+    }
+
     if (editing?.id === id) cancelEdit();
+    setError("");
   };
 
   const completeTask = (taskId: string) => {
@@ -247,6 +338,12 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
   };
 
   const updateNotes = (notes: string) => {
+    if (eventsData.isSupabaseMode) {
+      setNotesDraft(notes);
+      setError("");
+      return;
+    }
+
     setData((current) => ({
       ...current,
       events: current.events.map((item) => (item.id === eventId ? { ...item, notes } : item)),
@@ -558,10 +655,12 @@ export default function EventDetail({ data, setData }: EventDetailProps) {
         <WorkspacePanel title="Event Notes" icon={FileText}>
           <textarea
             className="min-h-40 w-full resize-y rounded-lg border border-white/10 bg-slate-950/45 p-3 text-sm leading-6 text-white outline-none focus:border-app-primary"
-            value={event.notes}
+            value={eventsData.isSupabaseMode ? notesDraft : event.notes}
             onChange={(changeEvent) => updateNotes(changeEvent.target.value)}
           />
-          <p className="mt-2 text-xs text-app-muted">Notes save automatically to localStorage.</p>
+          <p className="mt-2 text-xs text-app-muted">
+            Notes save automatically to {eventsData.isSupabaseMode ? "your workspace" : "localStorage"}.
+          </p>
         </WorkspacePanel>
 
         <WorkspacePanel title="Event Files" icon={FileText}>
@@ -896,6 +995,197 @@ function formatFileSize(size?: number) {
   if (!size) return "Size unavailable";
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+type CloudReadyGroup = "ticket" | "sponsor" | "artist" | "vendor" | "expense";
+type CloudReadyDeleteGroup = Exclude<CloudReadyGroup, "ticket">;
+
+interface SupabaseSaveContext {
+  artistsData: ArtistsDataSource;
+  editId?: string;
+  eventId: string;
+  expensesData: ExpensesDataSource;
+  form: Record<string, string>;
+  group: CloudReadyGroup;
+  scoped: ReturnType<typeof calculateEventWorkspace>;
+  sponsorsData: SponsorsDataSource;
+  ticketingData: TicketingDataSource;
+  vendorsData: VendorsDataSource;
+}
+
+interface SupabaseDeleteContext {
+  artistsData: ArtistsDataSource;
+  expensesData: ExpensesDataSource;
+  sponsorsData: SponsorsDataSource;
+  vendorsData: VendorsDataSource;
+}
+
+function isCloudReadyGroup(group: FormGroup): group is CloudReadyGroup {
+  return ["ticket", "sponsor", "artist", "vendor", "expense"].includes(group);
+}
+
+function isCloudReadyDeleteGroup(group: FormGroup): group is CloudReadyDeleteGroup {
+  return ["sponsor", "artist", "vendor", "expense"].includes(group);
+}
+
+async function saveSupabaseGroup(context: SupabaseSaveContext) {
+  const {
+    artistsData,
+    editId,
+    eventId,
+    expensesData,
+    form,
+    group,
+    scoped,
+    sponsorsData,
+    ticketingData,
+    vendorsData,
+  } = context;
+
+  if (group === "ticket") {
+    const name = getTicketCategoryName(form);
+    const existingTicket = findTicketCategory(scoped.tickets, name);
+    const inventory = Number(form.inventory);
+    const sold = Math.min((existingTicket?.sold ?? 0) + Number(form.sold || 0), inventory);
+    const input = {
+      checkedIn: existingTicket?.checkedIn ?? 0,
+      eventId,
+      inventory,
+      name,
+      price: Number(form.price),
+      sold,
+    };
+
+    if (existingTicket) {
+      await ticketingData.updateTicketCategory(existingTicket.id, input);
+    } else {
+      await ticketingData.createTicketCategory(input);
+    }
+    return;
+  }
+
+  if (group === "sponsor") {
+    const existingSponsor = editId
+      ? scoped.sponsors.find((sponsor) => sponsor.id === editId)
+      : undefined;
+    const input = {
+      agreementUploaded: form.agreementUploaded === "Yes",
+      companyName: form.companyName.trim(),
+      contactPerson: form.contactPerson.trim(),
+      email: form.email.trim(),
+      eventId: existingSponsor?.eventId ?? eventId,
+      nextFollowUp: existingSponsor?.nextFollowUp ?? "2026-06-10",
+      notes: existingSponsor?.notes ?? "Added from event workspace.",
+      paymentReceived: form.paymentReceived === "Yes",
+      phone: form.phone.trim(),
+      sponsorshipAmount: Number(form.sponsorshipAmount),
+      status: form.status as SponsorStatus,
+    };
+
+    if (editId) {
+      await sponsorsData.updateSponsor(editId, input);
+    } else {
+      await sponsorsData.createSponsor(input);
+    }
+    return;
+  }
+
+  if (group === "artist") {
+    const existingArtist = editId
+      ? scoped.artists.find((artist) => artist.id === editId)
+      : undefined;
+    const input = {
+      contractStatus: form.contractStatus as ContractStatus,
+      eventId: existingArtist?.eventId ?? eventId,
+      fee: Number(form.fee),
+      greenRoomCost: Number(form.greenRoomCost),
+      hotelCost: Number(form.hotelCost),
+      name: form.name.trim(),
+      paymentStatus: form.paymentStatus as PaymentStatus,
+      performanceSlot: existingArtist?.performanceSlot ?? "TBC",
+      profile: existingArtist?.profile ?? "Added from event workspace.",
+      technicalRiderStatus: form.technicalRiderStatus as "Pending" | "Received" | "Approved",
+      travelCost: Number(form.travelCost),
+    };
+
+    if (editId) {
+      await artistsData.updateArtist(editId, input);
+    } else {
+      await artistsData.createArtist(input);
+    }
+    return;
+  }
+
+  if (group === "vendor") {
+    const existingVendor = editId
+      ? scoped.vendors.find((vendor) => vendor.id === editId)
+      : undefined;
+    const input = {
+      advancePaid: Number(form.advancePaid),
+      amount: Number(form.amount),
+      category: form.category,
+      dueDate: form.dueDate,
+      eventId: existingVendor?.eventId ?? eventId,
+      name: form.name.trim(),
+      owner: existingVendor?.owner ?? "Ops",
+      status: form.status as "Pending" | "Paid",
+    };
+
+    if (editId) {
+      await vendorsData.updateVendor(editId, input);
+    } else {
+      await vendorsData.createVendor(input);
+    }
+    return;
+  }
+
+  const existingExpense = editId
+    ? scoped.expenses.find((expense) => expense.id === editId) as ExpenseRecord | undefined
+    : undefined;
+  const input = {
+    amount: Number(form.amount),
+    category: form.category as ExpenseCategory,
+    date: form.date,
+    description: form.description.trim(),
+    eventId: existingExpense?.eventId ?? eventId,
+    notes: existingExpense?.notes ?? "",
+    paymentStatus: existingExpense?.paymentStatus ?? "Paid",
+    vendorId: existingExpense?.vendorId,
+  };
+
+  if (editId) {
+    await expensesData.updateExpense(editId, input);
+  } else {
+    await expensesData.createExpense(input);
+  }
+}
+
+async function deleteSupabaseItem(
+  group: CloudReadyDeleteGroup,
+  id: string,
+  context: SupabaseDeleteContext,
+) {
+  if (group === "sponsor") {
+    await context.sponsorsData.deleteSponsor(id);
+    return;
+  }
+  if (group === "artist") {
+    await context.artistsData.deleteArtist(id);
+    return;
+  }
+  if (group === "vendor") {
+    await context.vendorsData.deleteVendor(id);
+    return;
+  }
+  await context.expensesData.deleteExpense(id);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
 
 function viewFile(dataUrl?: string) {

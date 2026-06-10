@@ -81,6 +81,24 @@ export async function updateWorkspaceEvent(
   return mapEventRow(data as EventRow);
 }
 
+export async function updateWorkspaceEventNotes(
+  workspaceId: string,
+  eventId: string,
+  notes: string,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("events")
+    .update({ notes })
+    .eq("workspace_id", workspaceId)
+    .eq("id", eventId)
+    .select(eventColumns)
+    .single();
+
+  if (error) throw error;
+  return mapEventRow(data as EventRow);
+}
+
 export async function deleteWorkspaceEvent(workspaceId: string, eventId: string) {
   const client = requireSupabase();
   const { error } = await client
