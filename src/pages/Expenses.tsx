@@ -4,20 +4,19 @@ import { Edit3, Landmark, PieChart, Plus, ReceiptText, Trash2, WalletCards, X } 
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
-import type { EventOSData, Expense, ExpenseCategory, Vendor } from "../types";
+import type { ExpensesDataSource } from "../hooks/useExpensesData";
+import type {
+  ExpensePaymentStatus,
+  ExpenseRecord as ManagedExpense,
+  ExpenseWriteInput,
+} from "../lib/expensesRepository";
+import type { EventOSData, ExpenseCategory, Vendor } from "../types";
 import { formatCurrency } from "../utils/finance";
 
 interface ExpensesProps {
   data: EventOSData;
+  expensesData: ExpensesDataSource;
 }
-
-type ExpensePaymentStatus = "Paid" | "Partial" | "Pending";
-
-type ManagedExpense = Expense & {
-  notes?: string;
-  paymentStatus?: ExpensePaymentStatus;
-  vendorId?: string;
-};
 
 type ExpenseForm = {
   amount: string;
@@ -51,19 +50,28 @@ const statusTone: Record<ExpensePaymentStatus, "green" | "amber" | "red"> = {
   Pending: "red",
 };
 
-export default function Expenses({ data }: ExpensesProps) {
+export default function Expenses({ data, expensesData }: ExpensesProps) {
+  const [actionError, setActionError] = useState("");
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [errors, setErrors] = useState<ExpenseFormErrors>({});
-  const [expenseList, setExpenseList] = useState<ManagedExpense[]>(() => readStoredExpenses() ?? data.expenses);
+  const [expenseList, setExpenseList] = useState<ManagedExpense[]>(() => (
+    expensesData.isSupabaseMode ? [] : readStoredExpenses() ?? data.expenses
+  ));
   const [form, setForm] = useState<ExpenseForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const vendors = useMemo(() => readStoredVendors() ?? data.vendors, [data.vendors]);
+  const [isSaving, setIsSaving] = useState(false);
+  const vendors = useMemo(
+    () => (expensesData.isSupabaseMode ? data.vendors : readStoredVendors() ?? data.vendors),
+    [data.vendors, expensesData.isSupabaseMode],
+  );
 
   useEffect(() => {
+    if (expensesData.isSupabaseMode) return;
+
     const storedExpenses = readStoredExpenses();
     if (storedExpenses) setExpenseList(storedExpenses);
-  }, []);
+  }, [expensesData.isSupabaseMode]);
 
   useEffect(() => {
     const handleGlobalSearch = (event: Event) => {
@@ -74,12 +82,16 @@ export default function Expenses({ data }: ExpensesProps) {
     return () => window.removeEventListener("eventos:global-search", handleGlobalSearch);
   }, []);
 
-  const filteredExpenses = useMemo(() => expenseList.filter((expense) => expenseMatchesSearch(expense, vendors, globalQuery)), [expenseList, globalQuery, vendors]);
-  const totals = useMemo(() => getExpenseTotals(expenseList), [expenseList]);
-  const categories = useMemo(() => getCategoryTotals(expenseList), [expenseList]);
-  const largestExpense = getLargestExpense(expenseList);
+  const activeExpenses = expensesData.isSupabaseMode ? expensesData.expenses : expenseList;
+  const filteredExpenses = useMemo(() => activeExpenses.filter((expense) => expenseMatchesSearch(expense, vendors, globalQuery)), [activeExpenses, globalQuery, vendors]);
+  const totals = useMemo(() => getExpenseTotals(activeExpenses), [activeExpenses]);
+  const categories = useMemo(() => getCategoryTotals(activeExpenses), [activeExpenses]);
+  const largestExpense = getLargestExpense(activeExpenses);
+  const visibleActionError = actionError || expensesData.error;
 
   const openAddModal = () => {
+    expensesData.clearError();
+    setActionError("");
     setEditingExpenseId(null);
     setErrors({});
     setForm(initialForm);
@@ -87,6 +99,8 @@ export default function Expenses({ data }: ExpensesProps) {
   };
 
   const openEditModal = (expense: ManagedExpense) => {
+    expensesData.clearError();
+    setActionError("");
     setEditingExpenseId(expense.id);
     setErrors({});
     setForm({
@@ -113,7 +127,7 @@ export default function Expenses({ data }: ExpensesProps) {
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const saveExpense = (event: FormEvent<HTMLFormElement>) => {
+  const saveExpense = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const validationErrors = validateExpenseForm(form);
     if (Object.keys(validationErrors).length > 0) {
@@ -122,6 +136,31 @@ export default function Expenses({ data }: ExpensesProps) {
     }
 
     const payload = makeExpensePayload(form);
+
+    if (expensesData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        const existingExpense = editingExpenseId
+          ? activeExpenses.find((expense) => expense.id === editingExpenseId)
+          : undefined;
+        const writeInput = expenseToWriteInput(payload, existingExpense);
+
+        if (editingExpenseId) {
+          await expensesData.updateExpense(editingExpenseId, writeInput);
+        } else {
+          await expensesData.createExpense(writeInput);
+        }
+
+        closeModal();
+      } catch (saveError) {
+        setActionError(getErrorMessage(saveError, "Unable to save the expense."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextExpenses = editingExpenseId
       ? expenseList.map((expense) => (expense.id === editingExpenseId ? { ...expense, ...payload } : expense))
       : [{ id: `expense-${Date.now()}`, ...payload }, ...expenseList];
@@ -131,8 +170,22 @@ export default function Expenses({ data }: ExpensesProps) {
     closeModal();
   };
 
-  const deleteExpense = (expense: ManagedExpense) => {
+  const deleteExpense = async (expense: ManagedExpense) => {
     if (!window.confirm(`Delete expense "${expense.description}"?`)) return;
+
+    if (expensesData.isSupabaseMode) {
+      setIsSaving(true);
+      setActionError("");
+      try {
+        await expensesData.deleteExpense(expense.id);
+      } catch (deleteError) {
+        setActionError(getErrorMessage(deleteError, "Unable to delete the expense."));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     const nextExpenses = expenseList.filter((item) => item.id !== expense.id);
     setExpenseList(nextExpenses);
     persistExpenses(nextExpenses);
@@ -144,7 +197,7 @@ export default function Expenses({ data }: ExpensesProps) {
         title="Expenses"
         description="Expense management for venue, artist, marketing, sound, lighting, food and security categories."
         action={
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500" onClick={openAddModal} type="button">
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={openAddModal} type="button">
             <Plus size={17} />
             Add Expense
           </button>
@@ -159,7 +212,25 @@ export default function Expenses({ data }: ExpensesProps) {
         <KpiCard title="Largest Expense" value={largestExpense ? formatCurrency(largestExpense.amount) : "₹0"} helper={largestExpense?.description ?? "No expense records"} icon={ReceiptText} tone="primary" />
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+      {visibleActionError && (
+        <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
+          {visibleActionError}
+        </div>
+      )}
+
+      {expensesData.isSupabaseMode && expensesData.isLoading ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
+          <p className="mt-4 text-sm font-medium text-slate-200">Loading workspace expenses...</p>
+        </section>
+      ) : expensesData.isSupabaseMode && activeExpenses.length === 0 && visibleActionError ? (
+        <section className="glass-panel rounded-lg p-8 text-center">
+          <ReceiptText className="mx-auto text-app-danger" size={28} />
+          <h2 className="mt-4 text-lg font-semibold text-white">Expenses are unavailable</h2>
+          <p className="mt-2 text-sm text-app-muted">No local or demo expenses were loaded as a fallback.</p>
+        </section>
+      ) : (
+        <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
         <div className="glass-panel rounded-lg p-5">
           <h2 className="text-base font-semibold text-white">Expense Summary</h2>
           <div className="mt-5 space-y-4">
@@ -214,8 +285,8 @@ export default function Expenses({ data }: ExpensesProps) {
                         <td className="px-4 py-4 text-slate-400">{new Date(expense.date).toLocaleDateString("en-IN")}</td>
                         <td className="rounded-r-lg px-4 py-4">
                           <div className="flex justify-end gap-2">
-                            <IconButton icon={Edit3} label="Edit" onClick={() => openEditModal(expense)} />
-                            <IconButton danger icon={Trash2} label="Delete" onClick={() => deleteExpense(expense)} />
+                            <IconButton disabled={isSaving} icon={Edit3} label="Edit" onClick={() => openEditModal(expense)} />
+                            <IconButton danger disabled={isSaving} icon={Trash2} label="Delete" onClick={() => void deleteExpense(expense)} />
                           </div>
                         </td>
                       </tr>
@@ -226,13 +297,15 @@ export default function Expenses({ data }: ExpensesProps) {
             </div>
           )}
         </div>
-      </section>
+        </section>
+      )}
 
       {isModalOpen && (
         <ExpenseModal
           editing={Boolean(editingExpenseId)}
           errors={errors}
           form={form}
+          isSaving={isSaving}
           onCancel={closeModal}
           onChange={updateField}
           onSubmit={saveExpense}
@@ -247,6 +320,7 @@ function ExpenseModal({
   editing,
   errors,
   form,
+  isSaving,
   onCancel,
   onChange,
   onSubmit,
@@ -255,6 +329,7 @@ function ExpenseModal({
   editing: boolean;
   errors: ExpenseFormErrors;
   form: ExpenseForm;
+  isSaving: boolean;
   onCancel: () => void;
   onChange: (field: keyof ExpenseForm, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -268,7 +343,7 @@ function ExpenseModal({
             <p className="text-xs uppercase tracking-[0.14em] text-app-primary">Expense Management</p>
             <h2 className="mt-1 text-xl font-semibold text-white">{editing ? "Edit Expense" : "Add Expense"}</h2>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08]" onClick={onCancel} type="button">
+          <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} onClick={onCancel} type="button">
             <X size={18} />
           </button>
         </div>
@@ -302,11 +377,11 @@ function ExpenseModal({
         </div>
 
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto" onClick={onCancel} type="button">
+          <button className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 sm:w-auto" type="submit">
-            {editing ? "Save Changes" : "Add Expense"}
+          <button className="h-10 w-full rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto" disabled={isSaving} type="submit">
+            {isSaving ? "Saving..." : editing ? "Save Changes" : "Add Expense"}
           </button>
         </div>
       </form>
@@ -324,12 +399,25 @@ function Field({ children, error, label }: { children: React.ReactNode; error?: 
   );
 }
 
-function IconButton({ danger = false, icon: Icon, label, onClick }: { danger?: boolean; icon: typeof Edit3; label: string; onClick: () => void }) {
+function IconButton({
+  danger = false,
+  disabled = false,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  danger?: boolean;
+  disabled?: boolean;
+  icon: typeof Edit3;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
-      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition ${
+      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
         danger ? "border-app-danger/30 bg-app-danger/10 text-red-200 hover:bg-app-danger/20" : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
       }`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -395,6 +483,30 @@ function makeExpensePayload(form: ExpenseForm): Omit<ManagedExpense, "id"> {
     paymentStatus: form.paymentStatus,
     vendorId: form.vendorId === directExpenseValue ? undefined : form.vendorId,
   };
+}
+
+function expenseToWriteInput(
+  expense: Omit<ManagedExpense, "id">,
+  existingExpense?: ManagedExpense,
+): ExpenseWriteInput {
+  return {
+    amount: expense.amount,
+    category: expense.category,
+    date: expense.date,
+    description: expense.description,
+    eventId: existingExpense?.eventId,
+    notes: expense.notes ?? "",
+    paymentStatus: expense.paymentStatus ?? "Paid",
+    vendorId: expense.vendorId,
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String(error.message);
+  }
+  return fallback;
 }
 
 function getVendorName(vendorId: string | undefined, vendors: Vendor[]) {
