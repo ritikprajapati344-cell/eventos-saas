@@ -1,0 +1,4 @@
+project_id = "eventos"
+
+[functions.process-storage-cleanup]
+verify_jwt = false
