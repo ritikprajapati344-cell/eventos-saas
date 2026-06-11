@@ -3,12 +3,15 @@ import { useEffect, useMemo, useState } from "react";
 import { BriefcaseBusiness, CalendarClock, Edit3, Handshake, Mail, Phone, Plus, TrendingUp, Trash2, UserRound, X } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { SponsorsDataSource } from "../hooks/useSponsorsData";
+import type { ActivityWriteInput } from "../lib/activitiesRepository";
 import type { SponsorWriteInput } from "../lib/sponsorsRepository";
 import type { EventOSData, Sponsor, SponsorStatus } from "../types";
 import { formatCurrency, getPipelineValue, getSponsorRevenue } from "../utils/finance";
 
 interface SponsorsProps {
+  activitiesData: ActivitiesDataSource;
   sponsors: Sponsor[];
   sponsorsData: SponsorsDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
@@ -53,8 +56,9 @@ const stageTone: Record<SponsorStatus, "blue" | "green" | "amber" | "red" | "sla
   "Closed Lost": "red",
 };
 
-export default function Sponsors({ sponsors, sponsorsData, setData }: SponsorsProps) {
+export default function Sponsors({ activitiesData, sponsors, sponsorsData, setData }: SponsorsProps) {
   const [actionError, setActionError] = useState("");
+  const [activityWarning, setActivityWarning] = useState("");
   const [editingSponsorId, setEditingSponsorId] = useState<string | null>(null);
   const [errors, setErrors] = useState<SponsorFormErrors>({});
   const [form, setForm] = useState<SponsorForm>(initialForm);
@@ -87,6 +91,15 @@ export default function Sponsors({ sponsors, sponsorsData, setData }: SponsorsPr
   const openPipeline = getPipelineValue(cleanSponsors);
   const activeDeals = cleanSponsors.filter((sponsor) => !["Closed Won", "Closed Lost"].includes(sponsor.status)).length;
   const visibleActionError = actionError || sponsorsData.error;
+
+  const recordActivity = async (input: ActivityWriteInput) => {
+    try {
+      await activitiesData.createActivity(input);
+      setActivityWarning("");
+    } catch {
+      setActivityWarning("The sponsor change was saved, but its activity could not be recorded.");
+    }
+  };
 
   const openAddModal = () => {
     sponsorsData.clearError();
@@ -148,22 +161,18 @@ export default function Sponsors({ sponsors, sponsorsData, setData }: SponsorsPr
           : undefined;
         const writeInput = sponsorToWriteInput(sponsorPayload, existingSponsor?.eventId);
 
-        if (editingSponsorId) {
-          await sponsorsData.updateSponsor(editingSponsorId, writeInput);
-        } else {
-          await sponsorsData.createSponsor(writeInput);
-        }
+        const savedSponsor = editingSponsorId
+          ? await sponsorsData.updateSponsor(editingSponsorId, writeInput)
+          : await sponsorsData.createSponsor(writeInput);
 
-        setData((current) => ({
-          ...current,
-          activities: [{
-            id: `activity-${Date.now()}`,
-            message: `${editingSponsorId ? "Updated" : "Added"} sponsor ${form.companyName.trim()}`,
-            entity: "Sponsors",
-            time: "Just now",
-            type: "Sponsor",
-          }, ...current.activities],
-        }));
+        await recordActivity({
+          entity: "Sponsors",
+          entityId: savedSponsor.id,
+          eventId: savedSponsor.eventId,
+          message: `${editingSponsorId ? "Updated" : "Added"} sponsor ${form.companyName.trim()}`,
+          metadata: { action: editingSponsorId ? "updated" : "created", source: "sponsors" },
+          type: "Sponsor",
+        });
         closeModal();
       } catch (saveError) {
         setActionError(getErrorMessage(saveError, "Unable to save the sponsor."));
@@ -202,16 +211,14 @@ export default function Sponsors({ sponsors, sponsorsData, setData }: SponsorsPr
       setActionError("");
       try {
         await sponsorsData.deleteSponsor(sponsor.id);
-        setData((current) => ({
-          ...current,
-          activities: [{
-            id: `activity-${Date.now()}`,
-            message: `Deleted sponsor ${sponsor.companyName}`,
-            entity: "Sponsors",
-            time: "Just now",
-            type: "Sponsor",
-          }, ...current.activities],
-        }));
+        await recordActivity({
+          entity: "Sponsors",
+          entityId: sponsor.id,
+          eventId: sponsor.eventId,
+          message: `Deleted sponsor ${sponsor.companyName}`,
+          metadata: { action: "deleted", source: "sponsors" },
+          type: "Sponsor",
+        });
       } catch (deleteError) {
         setActionError(getErrorMessage(deleteError, "Unable to delete the sponsor."));
       } finally {
@@ -241,16 +248,19 @@ export default function Sponsors({ sponsors, sponsorsData, setData }: SponsorsPr
       setActionError("");
       try {
         await sponsorsData.changeStage(sponsor.id, status);
-        setData((current) => ({
-          ...current,
-          activities: [{
-            id: `activity-${Date.now()}`,
-            message: `${sponsor.companyName} moved to ${status}`,
-            entity: "Sponsors",
-            time: "Just now",
-            type: "Sponsor",
-          }, ...current.activities],
-        }));
+        await recordActivity({
+          entity: "Sponsors",
+          entityId: sponsor.id,
+          eventId: sponsor.eventId,
+          message: `${sponsor.companyName} moved to ${status}`,
+          metadata: {
+            action: "stage_changed",
+            fromStage: sponsor.status,
+            source: "sponsors",
+            toStage: status,
+          },
+          type: "Sponsor",
+        });
       } catch (stageError) {
         setActionError(getErrorMessage(stageError, "Unable to change the sponsor stage."));
       } finally {
@@ -294,6 +304,11 @@ export default function Sponsors({ sponsors, sponsorsData, setData }: SponsorsPr
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
           {visibleActionError}
+        </div>
+      )}
+      {activityWarning && (
+        <div className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-4 py-3 text-sm text-amber-100">
+          {activityWarning}
         </div>
       )}
 

@@ -4,12 +4,15 @@ import { CalendarPlus, Clock, Copy, Edit3, MoreVertical, MapPin, RotateCcw, Tick
 import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
+import type { ActivityWriteInput } from "../lib/activitiesRepository";
 import type { EventWriteInput } from "../lib/eventsRepository";
 import type { EventItem, EventOSData, EventStatus, EventType } from "../types";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 interface EventsProps {
+  activitiesData: ActivitiesDataSource;
   data: EventOSData;
   eventsData: EventsDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
@@ -27,6 +30,7 @@ const eventTone: Record<EventStatus, "blue" | "green" | "amber" | "red" | "slate
 
 const eventTypes: EventType[] = ["Comedy Show", "Concert", "Corporate Event", "College Fest", "Conference", "Custom"];
 const statusOptions: EventStatus[] = ["Planning", "Upcoming", "Ongoing"];
+const activityWarningMessage = "The event change was saved, but its activity could not be recorded.";
 
 const sections: Array<{ title: string; status: EventStatus }> = [
   { title: "Planning Events", status: "Planning" },
@@ -51,7 +55,7 @@ const emptyForm = {
   status: "Planning",
 };
 
-export default function Events({ data, eventsData, setData }: EventsProps) {
+export default function Events({ activitiesData, data, eventsData, setData }: EventsProps) {
   const navigate = useNavigate();
   const calendar = buildEventsCalendar(data);
   const [modalMode, setModalMode] = useState<ModalMode | null>(null);
@@ -59,6 +63,7 @@ export default function Events({ data, eventsData, setData }: EventsProps) {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [activityWarning, setActivityWarning] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState("");
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -70,6 +75,17 @@ export default function Events({ data, eventsData, setData }: EventsProps) {
   const showToast = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
+  };
+
+  const recordActivity = async (input: ActivityWriteInput) => {
+    try {
+      await activitiesData.createActivity(input);
+      setActivityWarning("");
+      return true;
+    } catch {
+      setActivityWarning(activityWarningMessage);
+      return false;
+    }
   };
 
   const openCreate = () => {
@@ -189,13 +205,19 @@ export default function Events({ data, eventsData, setData }: EventsProps) {
       setIsSaving(true);
       try {
         const createdEvent = await eventsData.createEvent(eventToWriteInput(newEvent));
-        setData((current) => ({
-          ...current,
-          activities: [{ id: `activity-${Date.now()}`, message: `Created event ${createdEvent.name}`, entity: "Events", time: "Just now", type: "Event" }, ...current.activities],
-        }));
+        const activitySaved = await recordActivity({
+          entity: "Events",
+          entityId: createdEvent.id,
+          eventId: createdEvent.id,
+          message: `Created event ${createdEvent.name}`,
+          metadata: { action: "created", source: "events" },
+          type: "Event",
+        });
         closeModal();
         showToast("Event created successfully.");
-        navigate(`/events/${createdEvent.id}`);
+        navigate(`/events/${createdEvent.id}`, {
+          state: activitySaved ? undefined : { activityWarning: activityWarningMessage },
+        });
       } catch (saveError) {
         setError(getErrorMessage(saveError, "Unable to create the event."));
       } finally {
@@ -223,7 +245,13 @@ export default function Events({ data, eventsData, setData }: EventsProps) {
       setActionError("");
       try {
         await eventsData.deleteEvent(event.id);
-        setData((current) => cleanupDeletedEvent(current, event));
+        await recordActivity({
+          entity: "Events",
+          entityId: event.id,
+          message: `Deleted event ${event.name}`,
+          metadata: { action: "deleted", eventName: event.name, source: "events" },
+          type: "Event",
+        });
         showToast("Event deleted successfully.");
       } catch (deleteError) {
         setActionError(getErrorMessage(deleteError, "Unable to delete the event."));
@@ -256,6 +284,14 @@ export default function Events({ data, eventsData, setData }: EventsProps) {
       setActionError("");
       try {
         await eventsData.updateEvent(event.id, eventToWriteInput({ ...event, archived }));
+        await recordActivity({
+          entity: "Events",
+          entityId: event.id,
+          eventId: event.id,
+          message: `${archived ? "Archived" : "Restored"} event ${event.name}`,
+          metadata: { action: archived ? "archived" : "restored", source: "events" },
+          type: "Event",
+        });
         showToast(archived ? "Event archived successfully." : "Event restored successfully.");
       } catch (archiveError) {
         setActionError(getErrorMessage(archiveError, "Unable to update the event archive status."));
@@ -358,6 +394,11 @@ export default function Events({ data, eventsData, setData }: EventsProps) {
       />
 
       {toast && <div className="rounded-lg border border-app-success/30 bg-app-success/12 px-4 py-3 text-sm font-medium text-green-100">{toast}</div>}
+      {activityWarning && (
+        <div className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-4 py-3 text-sm text-amber-100">
+          {activityWarning}
+        </div>
+      )}
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
           {visibleActionError}
@@ -703,21 +744,6 @@ function eventToWriteInput(event: EventItem): EventWriteInput {
     owner: event.owner,
     status: event.status,
     venue: event.venue,
-  };
-}
-
-function cleanupDeletedEvent(data: EventOSData, event: EventItem): EventOSData {
-  return {
-    ...data,
-    events: data.events.filter((item) => item.id !== event.id),
-    ticketCategories: data.ticketCategories.filter((item) => item.eventId !== event.id),
-    sponsors: data.sponsors.filter((item) => item.eventId !== event.id),
-    artists: data.artists.filter((item) => item.eventId !== event.id),
-    vendors: data.vendors.filter((item) => item.eventId !== event.id),
-    expenses: data.expenses.filter((item) => item.eventId !== event.id),
-    timeline: data.timeline.filter((item) => item.eventId !== event.id),
-    tasks: data.tasks.filter((item) => item.eventId !== event.id),
-    activities: [{ id: `activity-${Date.now()}`, message: `Deleted event ${event.name}`, entity: "Events", time: "Just now", type: "Event" }, ...data.activities],
   };
 }
 

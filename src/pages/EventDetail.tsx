@@ -1,6 +1,6 @@
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   BadgeIndianRupee,
@@ -39,6 +39,7 @@ import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { ArtistsDataSource } from "../hooks/useArtistsData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { ExpensesDataSource } from "../hooks/useExpensesData";
@@ -47,6 +48,7 @@ import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
 import type { TimelineDataSource } from "../hooks/useTimelineData";
 import type { VendorsDataSource } from "../hooks/useVendorsData";
+import type { ActivityWriteInput } from "../lib/activitiesRepository";
 import type { ExpenseRecord } from "../lib/expensesRepository";
 import type {
   CheckInStatus,
@@ -63,6 +65,7 @@ import type {
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 interface EventDetailProps {
+  activitiesData: ActivitiesDataSource;
   artistsData: ArtistsDataSource;
   data: EventOSData;
   eventsData: EventsDataSource;
@@ -123,6 +126,7 @@ const tooltipStyle = {
 };
 
 export default function EventDetail({
+  activitiesData,
   artistsData,
   data,
   eventsData,
@@ -134,9 +138,11 @@ export default function EventDetail({
   timelineData,
   vendorsData,
 }: EventDetailProps) {
+  const location = useLocation();
   const { eventId } = useParams();
   const event = data.events.find((item) => item.id === eventId);
   const [forms, setForms] = useState(initialForms);
+  const [activityWarning, setActivityWarning] = useState(() => getNavigationActivityWarning(location.state));
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<{ group: FormGroup; id: string } | null>(null);
   const [notesDraft, setNotesDraft] = useState(event?.notes ?? "");
@@ -188,6 +194,15 @@ export default function EventDetail({
   const activeTicketCategory = getExistingTicketFromForm(forms.ticket);
   const isUpdatingTicketCategory = Boolean(activeTicketCategory);
 
+  const recordActivity = async (input: ActivityWriteInput) => {
+    try {
+      await activitiesData.createActivity(input);
+      setActivityWarning("");
+    } catch {
+      setActivityWarning("The workspace change was saved, but its activity could not be recorded.");
+    }
+  };
+
   const updateForm = (group: FormGroup, field: string, value: string) => {
     if (group === "ticket" && field === "preset") {
       const existingTicket = value === "Custom" ? undefined : findTicketCategory(scoped.tickets, value);
@@ -237,8 +252,9 @@ export default function EventDetail({
     const editId = editing?.group === group ? editing.id : undefined;
 
     if (isCloudReadyGroup(group) && eventsData.isSupabaseMode) {
+      let activityInput: ActivityWriteInput | null = null;
       try {
-        await saveSupabaseGroup({
+        activityInput = await saveSupabaseGroup({
           artistsData,
           editId,
           eventId,
@@ -255,6 +271,9 @@ export default function EventDetail({
       } catch (saveError) {
         setError(getErrorMessage(saveError, `Unable to save ${group} in Supabase.`));
         return;
+      }
+      if (activityInput) {
+        await recordActivity(activityInput);
       }
     } else {
       setData((current) => applyEventUpdate(current, eventId, group, forms[group], editId));
@@ -304,7 +323,15 @@ export default function EventDetail({
   const completeTask = async (taskId: string) => {
     if (tasksData.isSupabaseMode) {
       try {
-        await tasksData.completeTask(taskId);
+        const completedTask = await tasksData.completeTask(taskId);
+        await recordActivity({
+          entity: "Events",
+          entityId: completedTask.id,
+          eventId,
+          message: "Completed event task",
+          metadata: { action: "completed", source: "event-detail" },
+          type: "Task",
+        });
         setError("");
       } catch (completeError) {
         setError(getErrorMessage(completeError, "Unable to complete the task in Supabase."));
@@ -401,6 +428,7 @@ export default function EventDetail({
       </section>
 
       {error && <p className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">{error}</p>}
+      {activityWarning && <p className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-3 py-2 text-sm text-amber-100">{activityWarning}</p>}
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <WorkspacePanel title="Professional Ticket Management" icon={Ticket}>
@@ -1082,12 +1110,17 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
       sold,
     };
 
-    if (existingTicket) {
-      await ticketingData.updateTicketCategory(existingTicket.id, input);
-    } else {
-      await ticketingData.createTicketCategory(input);
-    }
-    return;
+    const savedTicket = existingTicket
+      ? await ticketingData.updateTicketCategory(existingTicket.id, input)
+      : await ticketingData.createTicketCategory(input);
+    return {
+      entity: "Events",
+      entityId: savedTicket.id,
+      eventId,
+      message: `${existingTicket ? "Updated" : "Added"} ${name} ticket category`,
+      metadata: { action: existingTicket ? "updated" : "created", source: "event-detail" },
+      type: "Ticketing",
+    } satisfies ActivityWriteInput;
   }
 
   if (group === "sponsor") {
@@ -1108,12 +1141,17 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
       status: form.status as SponsorStatus,
     };
 
-    if (editId) {
-      await sponsorsData.updateSponsor(editId, input);
-    } else {
-      await sponsorsData.createSponsor(input);
-    }
-    return;
+    const savedSponsor = editId
+      ? await sponsorsData.updateSponsor(editId, input)
+      : await sponsorsData.createSponsor(input);
+    return {
+      entity: "Events",
+      entityId: savedSponsor.id,
+      eventId,
+      message: `${editId ? "Updated" : "Added"} event sponsor ${form.companyName}`,
+      metadata: { action: editId ? "updated" : "created", source: "event-detail" },
+      type: "Sponsor",
+    } satisfies ActivityWriteInput;
   }
 
   if (group === "artist") {
@@ -1134,12 +1172,17 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
       travelCost: Number(form.travelCost),
     };
 
-    if (editId) {
-      await artistsData.updateArtist(editId, input);
-    } else {
-      await artistsData.createArtist(input);
-    }
-    return;
+    const savedArtist = editId
+      ? await artistsData.updateArtist(editId, input)
+      : await artistsData.createArtist(input);
+    return {
+      entity: "Events",
+      entityId: savedArtist.id,
+      eventId,
+      message: `${editId ? "Updated" : "Assigned"} artist ${form.name}`,
+      metadata: { action: editId ? "updated" : "created", source: "event-detail" },
+      type: "Artist",
+    } satisfies ActivityWriteInput;
   }
 
   if (group === "vendor") {
@@ -1157,12 +1200,17 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
       status: form.status as "Pending" | "Paid",
     };
 
-    if (editId) {
-      await vendorsData.updateVendor(editId, input);
-    } else {
-      await vendorsData.createVendor(input);
-    }
-    return;
+    const savedVendor = editId
+      ? await vendorsData.updateVendor(editId, input)
+      : await vendorsData.createVendor(input);
+    return {
+      entity: "Events",
+      entityId: savedVendor.id,
+      eventId,
+      message: `${editId ? "Updated" : "Assigned"} vendor ${form.name}`,
+      metadata: { action: editId ? "updated" : "created", source: "event-detail" },
+      type: "Vendor",
+    } satisfies ActivityWriteInput;
   }
 
   if (group === "expense") {
@@ -1180,12 +1228,17 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
       vendorId: existingExpense?.vendorId,
     };
 
-    if (editId) {
-      await expensesData.updateExpense(editId, input);
-    } else {
-      await expensesData.createExpense(input);
-    }
-    return;
+    const savedExpense = editId
+      ? await expensesData.updateExpense(editId, input)
+      : await expensesData.createExpense(input);
+    return {
+      entity: "Events",
+      entityId: savedExpense.id,
+      eventId,
+      message: `${editId ? "Updated" : "Added"} event expense ${formatCurrency(Number(form.amount))}`,
+      metadata: { action: editId ? "updated" : "created", source: "event-detail" },
+      type: "Finance",
+    } satisfies ActivityWriteInput;
   }
 
   if (group === "task") {
@@ -1198,12 +1251,17 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
       title: form.title.trim(),
     };
 
-    if (editId) {
-      await tasksData.updateTask(editId, input);
-    } else {
-      await tasksData.createTask(input);
-    }
-    return;
+    const savedTask = editId
+      ? await tasksData.updateTask(editId, input)
+      : await tasksData.createTask(input);
+    return {
+      entity: "Events",
+      entityId: savedTask.id,
+      eventId,
+      message: `${editId ? "Updated" : "Added"} task ${form.title}`,
+      metadata: { action: editId ? "updated" : "created", source: "event-detail" },
+      type: "Task",
+    } satisfies ActivityWriteInput;
   }
 
   const input = {
@@ -1219,6 +1277,7 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
   } else {
     await timelineData.createTimelineItem(input);
   }
+  return null;
 }
 
 async function deleteSupabaseItem(
@@ -1255,6 +1314,11 @@ function getErrorMessage(error: unknown, fallback: string) {
     return String(error.message);
   }
   return fallback;
+}
+
+function getNavigationActivityWarning(state: unknown) {
+  if (typeof state !== "object" || !state || !("activityWarning" in state)) return "";
+  return typeof state.activityWarning === "string" ? state.activityWarning : "";
 }
 
 function viewFile(dataUrl?: string) {

@@ -21,6 +21,7 @@ export type ExpenseCategory =
 export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done";
 export type TaskPriority = "High" | "Medium" | "Low";
 export type CheckInStatus = "Not Started" | "Active" | "Sold Out";
+export type ActivityType = "Event" | "Sponsor" | "Artist" | "Vendor" | "Finance" | "Ticketing" | "Task" | "File";
 
 export interface EventItem {
   id: string;
@@ -127,11 +128,15 @@ export interface Task {
 }
 
 export interface Activity {
+  entityId?: string;
+  eventId?: string;
   id: string;
   message: string;
   entity: string;
+  metadata?: Record<string, unknown>;
+  occurredAt?: string;
   time: string;
-  type: "Event" | "Sponsor" | "Artist" | "Vendor" | "Finance" | "Ticketing";
+  type: ActivityType;
 }
 
 export interface TimelineItem {

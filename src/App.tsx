@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
+import { useActivitiesData } from "./hooks/useActivitiesData";
 import { useArtistsData } from "./hooks/useArtistsData";
 import { useAuth } from "./hooks/useAuth";
 import { useExpensesData } from "./hooks/useExpensesData";
@@ -37,6 +38,7 @@ export default function App() {
 function AuthenticatedApp() {
   const { workspaceId } = useAuth();
   const { data: localData, setData } = useEventOSData();
+  const activitiesData = useActivitiesData(workspaceId);
   const eventsData = useEventsData(workspaceId);
   const sponsorsData = useSponsorsData(workspaceId);
   const artistsData = useArtistsData(workspaceId);
@@ -47,9 +49,10 @@ function AuthenticatedApp() {
   const settingsData = useSettingsData(workspaceId);
   const tasksData = useTasksData(workspaceId);
   const timelineData = useTimelineData(workspaceId);
-  const data = eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode || tasksData.isSupabaseMode || timelineData.isSupabaseMode
+  const data = activitiesData.isSupabaseMode || eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode || tasksData.isSupabaseMode || timelineData.isSupabaseMode
     ? {
         ...localData,
+        activities: activitiesData.isSupabaseMode ? activitiesData.activities : localData.activities,
         artists: artistsData.isSupabaseMode ? artistsData.artists : localData.artists,
         events: eventsData.isSupabaseMode ? eventsData.events : localData.events,
         expenses: expensesData.isSupabaseMode ? expensesData.expenses : localData.expenses,
@@ -65,11 +68,12 @@ function AuthenticatedApp() {
     <AppLayout data={data}>
       <Routes>
         <Route path="/" element={<Dashboard data={data} setData={setData} />} />
-        <Route path="/events" element={<Events data={data} eventsData={eventsData} setData={setData} />} />
+        <Route path="/events" element={<Events activitiesData={activitiesData} data={data} eventsData={eventsData} setData={setData} />} />
         <Route
           path="/events/:eventId"
           element={(
             <EventDetail
+              activitiesData={activitiesData}
               artistsData={artistsData}
               data={data}
               eventsData={eventsData}
@@ -83,7 +87,7 @@ function AuthenticatedApp() {
             />
           )}
         />
-        <Route path="/sponsors" element={<Sponsors sponsors={data.sponsors} sponsorsData={sponsorsData} setData={setData} />} />
+        <Route path="/sponsors" element={<Sponsors activitiesData={activitiesData} sponsors={data.sponsors} sponsorsData={sponsorsData} setData={setData} />} />
         <Route path="/artists" element={<Artists artists={data.artists} artistsData={artistsData} />} />
         <Route path="/vendors" element={<Vendors vendors={data.vendors} vendorsData={vendorsData} />} />
         <Route path="/ticketing" element={<Ticketing data={data} ticketingData={ticketingData} />} />
