@@ -244,23 +244,32 @@ export default function Finance({ data, financeData }: FinanceProps) {
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <ChartCard title="Financial Forecast" subtitle="Forecast and actual revenue across event planning months">
-          <div className="h-[250px] sm:h-[340px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data.revenueForecast}>
-                <defs>
-                  <linearGradient id="financeForecast" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={chartPalette.blue} stopOpacity={0.44} />
-                    <stop offset="95%" stopColor={chartPalette.blue} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
-                <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} tickFormatter={(value) => `${Number(value) / 100000}L`} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
-                <Area type="monotone" dataKey="forecast" stroke={chartPalette.blue} strokeWidth={3} fill="url(#financeForecast)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {financeData.isSupabaseMode ? (
+            <div className="grid h-[250px] place-items-center rounded-lg border border-dashed border-white/10 bg-white/[0.025] px-5 text-center sm:h-[340px]">
+              <div>
+                <TrendingUp className="mx-auto text-slate-500" size={24} />
+                <p className="mt-3 text-sm text-app-muted">Financial forecast data is not available in cloud mode yet.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-[250px] sm:h-[340px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={data.revenueForecast}>
+                  <defs>
+                    <linearGradient id="financeForecast" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={chartPalette.blue} stopOpacity={0.44} />
+                      <stop offset="95%" stopColor={chartPalette.blue} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
+                  <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
+                  <YAxis tick={axisStyle} axisLine={false} tickLine={false} tickFormatter={(value) => `${Number(value) / 100000}L`} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
+                  <Area type="monotone" dataKey="forecast" stroke={chartPalette.blue} strokeWidth={3} fill="url(#financeForecast)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </ChartCard>
 
         <section className="glass-panel rounded-lg p-4">

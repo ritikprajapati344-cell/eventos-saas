@@ -323,29 +323,7 @@ export default function Events({ activitiesData, data, eventFilesData, eventsDat
     setOpenMenu(null);
 
     if (eventsData.isSupabaseMode) {
-      setIsSaving(true);
-      setActionError("");
-      try {
-        const duplicatedEvent = await eventsData.createEvent(eventToWriteInput({
-          ...event,
-          archived: false,
-          id: "",
-          name: `${event.name} Copy`,
-          progress: 0,
-          status: "Planning",
-          ticketPrice: 0,
-          ticketsSold: 0,
-        }));
-        setData((current) => ({
-          ...current,
-          activities: [{ id: `activity-${Date.now()}`, message: `Duplicated event ${event.name}`, entity: "Events", time: "Just now", type: "Event" }, ...current.activities],
-        }));
-        showToast(`Created ${duplicatedEvent.name}.`);
-      } catch (duplicateError) {
-        setActionError(getErrorMessage(duplicateError, "Unable to duplicate the event."));
-      } finally {
-        setIsSaving(false);
-      }
+      showToast("Duplicate event is not available in cloud mode yet.");
       return;
     }
 
@@ -450,6 +428,7 @@ export default function Events({ activitiesData, data, eventFilesData, eventsDat
                     data={data}
                     event={event}
                     isMenuOpen={openMenu === event.id}
+                    isDuplicateDisabled={eventsData.isSupabaseMode}
                     onArchive={() => archiveEvent(event, true)}
                     onDelete={() => deleteEvent(event)}
                     onDuplicate={() => duplicateEvent(event)}
@@ -477,6 +456,7 @@ export default function Events({ activitiesData, data, eventFilesData, eventsDat
               event={event}
               isArchived
               isMenuOpen={openMenu === event.id}
+              isDuplicateDisabled={eventsData.isSupabaseMode}
               onArchive={() => archiveEvent(event, true)}
               onDelete={() => deleteEvent(event)}
               onDuplicate={() => duplicateEvent(event)}
@@ -552,6 +532,7 @@ function EventMiniCard({
   event,
   data,
   isArchived = false,
+  isDuplicateDisabled = false,
   isMenuOpen,
   onArchive,
   onDelete,
@@ -563,6 +544,7 @@ function EventMiniCard({
   event: EventItem;
   data: EventOSData;
   isArchived?: boolean;
+  isDuplicateDisabled?: boolean;
   isMenuOpen: boolean;
   onArchive: () => void;
   onDelete: () => void;
@@ -593,7 +575,12 @@ function EventMiniCard({
         <div className="absolute right-3 top-12 z-10 w-44 rounded-lg border border-white/10 bg-slate-950 p-1 shadow-premium">
           <MenuLink icon={Eye} label="View Workspace" to={`/events/${event.id}`} />
           <MenuButton icon={Edit3} label="Edit Event" onClick={onEdit} />
-          <MenuButton icon={Copy} label="Duplicate Event" onClick={onDuplicate} />
+          <MenuButton disabled={isDuplicateDisabled} icon={Copy} label="Duplicate Event" onClick={onDuplicate} />
+          {isDuplicateDisabled && (
+            <p className="px-3 pb-2 text-[11px] leading-4 text-app-muted">
+              Duplicate event is not available in cloud mode yet.
+            </p>
+          )}
           {isArchived && onRestore ? <MenuButton icon={RotateCcw} label="Restore Event" onClick={onRestore} /> : <MenuButton icon={Archive} label="Archive Event" onClick={onArchive} />}
           <MenuButton danger icon={Trash2} label="Delete Event" onClick={onDelete} />
         </div>
@@ -691,8 +678,8 @@ function SelectField({ label, value, onChange, options }: { label: string; value
   );
 }
 
-function MenuButton({ danger = false, icon: Icon, label, onClick }: { danger?: boolean; icon: typeof Eye; label: string; onClick: () => void }) {
-  return <button className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm ${danger ? "text-red-200 hover:bg-app-danger/12" : "text-slate-200 hover:bg-white/[0.06]"}`} onClick={onClick} type="button"><Icon size={15} />{label}</button>;
+function MenuButton({ danger = false, disabled = false, icon: Icon, label, onClick }: { danger?: boolean; disabled?: boolean; icon: typeof Eye; label: string; onClick: () => void }) {
+  return <button className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:text-slate-600 ${danger ? "text-red-200 hover:bg-app-danger/12" : "text-slate-200 hover:bg-white/[0.06]"} disabled:hover:bg-transparent`} disabled={disabled} onClick={onClick} type="button"><Icon size={15} />{label}</button>;
 }
 
 function MenuLink({ icon: Icon, label, to }: { icon: typeof Eye; label: string; to: string }) {

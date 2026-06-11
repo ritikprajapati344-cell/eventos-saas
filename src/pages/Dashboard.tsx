@@ -57,6 +57,7 @@ import {
 
 interface DashboardProps {
   data: EventOSData;
+  isSupabaseMode: boolean;
   setData: Dispatch<SetStateAction<EventOSData>>;
 }
 
@@ -142,7 +143,7 @@ const initialForms: Record<QuickAction, Record<string, string>> = {
   },
 };
 
-export default function Dashboard({ data, setData }: DashboardProps) {
+export default function Dashboard({ data, isSupabaseMode, setData }: DashboardProps) {
   const [activeAction, setActiveAction] = useState<QuickAction | null>(null);
   const [forms, setForms] = useState(initialForms);
   const [error, setError] = useState("");
@@ -178,6 +179,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
   const calendar = useMemo(() => buildCalendar(data), [data]);
 
   const openAction = (action: QuickAction) => {
+    if (isSupabaseMode) return;
     setError("");
     setActiveAction(action);
   };
@@ -229,7 +231,7 @@ export default function Dashboard({ data, setData }: DashboardProps) {
         description="Clean operating dashboard for events, sponsors, tickets, tasks and financial visibility."
         action={
           <div className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300 md:block">
-            Local-first demo workspace
+            {isSupabaseMode ? "Cloud workspace" : "Local-first demo workspace"}
           </div>
         }
       />
@@ -244,13 +246,19 @@ export default function Dashboard({ data, setData }: DashboardProps) {
       </section>
 
       <section className="glass-panel min-w-0 rounded-lg p-3">
+        {isSupabaseMode && (
+          <p className="mb-3 rounded-lg border border-app-warning/30 bg-app-warning/10 px-3 py-2 text-sm text-amber-100">
+            Quick actions are disabled in cloud mode. Use the module pages.
+          </p>
+        )}
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (
               <button
                 key={action.id}
-                className="flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-100 transition hover:border-app-primary/40 hover:bg-app-primary/12 focus:outline-none focus:ring-2 focus:ring-app-primary/50"
+                className="flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-100 transition hover:border-app-primary/40 hover:bg-app-primary/12 focus:outline-none focus:ring-2 focus:ring-app-primary/50 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.02] disabled:text-slate-500 disabled:hover:bg-white/[0.02]"
+                disabled={isSupabaseMode}
                 onClick={() => openAction(action.id)}
                 type="button"
               >
@@ -264,18 +272,22 @@ export default function Dashboard({ data, setData }: DashboardProps) {
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
         <ChartCard title="Revenue Forecast" subtitle="Actual revenue against forecasted commercial plan">
-          <ChartBox height="h-[220px] sm:h-[260px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data.revenueForecast} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
-                <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
-                <Line type="monotone" dataKey="forecast" stroke={chartPalette.amber} strokeWidth={2.5} dot={false} />
-                <Line type="monotone" dataKey="actual" stroke={chartPalette.green} strokeWidth={3} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          {isSupabaseMode ? (
+            <ChartEmptyState message="Revenue forecast data is not available in cloud mode yet." />
+          ) : (
+            <ChartBox height="h-[220px] sm:h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={data.revenueForecast} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
+                  <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
+                  <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
+                  <Line type="monotone" dataKey="forecast" stroke={chartPalette.amber} strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="actual" stroke={chartPalette.green} strokeWidth={3} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartBox>
+          )}
         </ChartCard>
 
         <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-1">
@@ -403,43 +415,51 @@ export default function Dashboard({ data, setData }: DashboardProps) {
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-2">
         <ChartCard title="Revenue Trend" subtitle="Commercial momentum across planning months">
-          <ChartBox height="h-[220px] sm:h-[248px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={chartPalette.blue} stopOpacity={0.42} />
-                    <stop offset="95%" stopColor={chartPalette.blue} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
-                <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
-                <Area type="monotone" dataKey="revenue" stroke={chartPalette.blue} strokeWidth={3} fill="url(#revenueFill)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          {isSupabaseMode ? (
+            <ChartEmptyState message="Revenue trend will appear when cloud analytics support is available." />
+          ) : (
+            <ChartBox height="h-[220px] sm:h-[248px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={chartPalette.blue} stopOpacity={0.42} />
+                      <stop offset="95%" stopColor={chartPalette.blue} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
+                  <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
+                  <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
+                  <Area type="monotone" dataKey="revenue" stroke={chartPalette.blue} strokeWidth={3} fill="url(#revenueFill)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartBox>
+          )}
         </ChartCard>
 
         <ChartCard title="Monthly Profit" subtitle="Profit trajectory after operating costs">
-          <ChartBox height="h-[220px] sm:h-[248px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={monthlyProfit} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="profitFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={chartPalette.green} stopOpacity={0.45} />
-                    <stop offset="95%" stopColor={chartPalette.green} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
-                <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
-                <Area type="monotone" dataKey="profit" stroke={chartPalette.green} strokeWidth={3} fill="url(#profitFill)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          {isSupabaseMode ? (
+            <ChartEmptyState message="Monthly profit history is not available in cloud mode yet." />
+          ) : (
+            <ChartBox height="h-[220px] sm:h-[248px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={monthlyProfit} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="profitFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={chartPalette.green} stopOpacity={0.45} />
+                      <stop offset="95%" stopColor={chartPalette.green} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
+                  <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
+                  <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
+                  <Area type="monotone" dataKey="profit" stroke={chartPalette.green} strokeWidth={3} fill="url(#profitFill)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartBox>
+          )}
         </ChartCard>
       </section>
 
@@ -459,6 +479,17 @@ export default function Dashboard({ data, setData }: DashboardProps) {
 
 function ChartBox({ height, children }: { height: string; children: ReactNode }) {
   return <div className={`${height} min-h-0 min-w-0 overflow-hidden`}>{children}</div>;
+}
+
+function ChartEmptyState({ message }: { message: string }) {
+  return (
+    <div className="grid h-[220px] place-items-center rounded-lg border border-dashed border-white/10 bg-white/[0.025] px-5 text-center sm:h-[248px]">
+      <div>
+        <TrendingUp className="mx-auto text-slate-500" size={24} />
+        <p className="mt-3 text-sm text-app-muted">{message}</p>
+      </div>
+    </div>
+  );
 }
 
 function Widget({ title, children }: { title: string; children: ReactNode }) {

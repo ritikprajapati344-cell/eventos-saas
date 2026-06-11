@@ -70,13 +70,14 @@ function AuthenticatedApp() {
         ticketCategories: ticketingData.isSupabaseMode ? ticketingData.ticketCategories : localData.ticketCategories,
         timeline: timelineData.isSupabaseMode ? timelineData.timeline : localData.timeline,
         vendors: vendorsData.isSupabaseMode ? vendorsData.vendors : localData.vendors,
+        revenueForecast: eventsData.isSupabaseMode ? [] : localData.revenueForecast,
       }
     : localData;
 
   return (
     <AppLayout data={data}>
       <Routes>
-        <Route path="/" element={<Dashboard data={data} setData={setData} />} />
+        <Route path="/" element={<Dashboard data={data} isSupabaseMode={eventsData.isSupabaseMode} setData={setData} />} />
         <Route path="/events" element={<Events activitiesData={activitiesData} data={data} eventFilesData={eventFilesData} eventsData={eventsData} setData={setData} />} />
         <Route
           path="/events/:eventId"

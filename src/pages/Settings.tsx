@@ -199,14 +199,19 @@ export default function Settings({ settingsData }: SettingsProps) {
           </SettingsPanel>
 
           <SettingsPanel icon={Download} title="Workspace Backup">
-            <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-center text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={exportWorkspace} type="button">
+            {settingsData.isSupabaseMode && (
+              <p className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-3 py-2 text-sm leading-5 text-amber-100">
+                Local-only legacy backup. This does not include Supabase workspace data.
+              </p>
+            )}
+            <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-center text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:border-white/5 disabled:text-slate-500 disabled:hover:bg-white/[0.04]" disabled={settingsData.isSupabaseMode} onClick={exportWorkspace} type="button">
               <Download size={17} />
-              Export Full EventOS Data
+              {settingsData.isSupabaseMode ? "Export Local Legacy Data" : "Export Full EventOS Data"}
             </button>
-            <label className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-center text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]">
+            <label className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-center text-sm font-medium transition ${settingsData.isSupabaseMode ? "cursor-not-allowed border-white/5 text-slate-500" : "cursor-pointer text-slate-200 hover:bg-white/[0.08]"}`}>
               <Upload size={17} />
-              Import Full EventOS Data
-              <input accept="application/json,.json" className="hidden" onChange={importWorkspace} type="file" />
+              {settingsData.isSupabaseMode ? "Import Local Legacy Data" : "Import Full EventOS Data"}
+              <input accept="application/json,.json" className="hidden" disabled={settingsData.isSupabaseMode} onChange={importWorkspace} type="file" />
             </label>
           </SettingsPanel>
         </div>
