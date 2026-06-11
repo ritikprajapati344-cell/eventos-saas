@@ -46,12 +46,16 @@ export interface EventItem {
 }
 
 export interface EventFile {
+  eventId?: string;
   id: string;
   name: string;
   fileType: string;
   uploadDate: string;
   size?: number;
   dataUrl?: string;
+  storageBucket?: string;
+  storagePath?: string;
+  uploadedBy?: string;
 }
 
 export interface Sponsor {

@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
+import type { EventFilesDataSource } from "../hooks/useEventFilesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { ActivityWriteInput } from "../lib/activitiesRepository";
 import type { EventWriteInput } from "../lib/eventsRepository";
@@ -14,6 +15,7 @@ import { formatCurrency, formatNumber } from "../utils/finance";
 interface EventsProps {
   activitiesData: ActivitiesDataSource;
   data: EventOSData;
+  eventFilesData: EventFilesDataSource;
   eventsData: EventsDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
 }
@@ -55,7 +57,7 @@ const emptyForm = {
   status: "Planning",
 };
 
-export default function Events({ activitiesData, data, eventsData, setData }: EventsProps) {
+export default function Events({ activitiesData, data, eventFilesData, eventsData, setData }: EventsProps) {
   const navigate = useNavigate();
   const calendar = buildEventsCalendar(data);
   const [modalMode, setModalMode] = useState<ModalMode | null>(null);
@@ -244,7 +246,9 @@ export default function Events({ activitiesData, data, eventsData, setData }: Ev
       setIsSaving(true);
       setActionError("");
       try {
+        await eventFilesData.removeEventStorageObjects(event.id);
         await eventsData.deleteEvent(event.id);
+        eventFilesData.forgetEventFiles(event.id);
         await recordActivity({
           entity: "Events",
           entityId: event.id,

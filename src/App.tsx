@@ -7,6 +7,7 @@ import { useAuth } from "./hooks/useAuth";
 import { useExpensesData } from "./hooks/useExpensesData";
 import { useFinanceData } from "./hooks/useFinanceData";
 import { useEventOSData } from "./hooks/useEventOSData";
+import { useEventFilesData } from "./hooks/useEventFilesData";
 import { useEventsData } from "./hooks/useEventsData";
 import { useSettingsData } from "./hooks/useSettingsData";
 import { useSponsorsData } from "./hooks/useSponsorsData";
@@ -36,9 +37,10 @@ export default function App() {
 }
 
 function AuthenticatedApp() {
-  const { workspaceId } = useAuth();
+  const { user, workspaceId } = useAuth();
   const { data: localData, setData } = useEventOSData();
   const activitiesData = useActivitiesData(workspaceId);
+  const eventFilesData = useEventFilesData(workspaceId, user?.id ?? null);
   const eventsData = useEventsData(workspaceId);
   const sponsorsData = useSponsorsData(workspaceId);
   const artistsData = useArtistsData(workspaceId);
@@ -49,12 +51,19 @@ function AuthenticatedApp() {
   const settingsData = useSettingsData(workspaceId);
   const tasksData = useTasksData(workspaceId);
   const timelineData = useTimelineData(workspaceId);
-  const data = activitiesData.isSupabaseMode || eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode || tasksData.isSupabaseMode || timelineData.isSupabaseMode
+  const data = activitiesData.isSupabaseMode || eventFilesData.isSupabaseMode || eventsData.isSupabaseMode || sponsorsData.isSupabaseMode || artistsData.isSupabaseMode || vendorsData.isSupabaseMode || ticketingData.isSupabaseMode || expensesData.isSupabaseMode || tasksData.isSupabaseMode || timelineData.isSupabaseMode
     ? {
         ...localData,
         activities: activitiesData.isSupabaseMode ? activitiesData.activities : localData.activities,
         artists: artistsData.isSupabaseMode ? artistsData.artists : localData.artists,
-        events: eventsData.isSupabaseMode ? eventsData.events : localData.events,
+        events: eventsData.isSupabaseMode
+          ? eventsData.events.map((event) => ({
+              ...event,
+              files: eventFilesData.isSupabaseMode
+                ? eventFilesData.files.filter((file) => file.eventId === event.id)
+                : event.files,
+            }))
+          : localData.events,
         expenses: expensesData.isSupabaseMode ? expensesData.expenses : localData.expenses,
         sponsors: sponsorsData.isSupabaseMode ? sponsorsData.sponsors : localData.sponsors,
         tasks: tasksData.isSupabaseMode ? tasksData.tasks : localData.tasks,
@@ -68,7 +77,7 @@ function AuthenticatedApp() {
     <AppLayout data={data}>
       <Routes>
         <Route path="/" element={<Dashboard data={data} setData={setData} />} />
-        <Route path="/events" element={<Events activitiesData={activitiesData} data={data} eventsData={eventsData} setData={setData} />} />
+        <Route path="/events" element={<Events activitiesData={activitiesData} data={data} eventFilesData={eventFilesData} eventsData={eventsData} setData={setData} />} />
         <Route
           path="/events/:eventId"
           element={(
@@ -76,6 +85,7 @@ function AuthenticatedApp() {
               activitiesData={activitiesData}
               artistsData={artistsData}
               data={data}
+              eventFilesData={eventFilesData}
               eventsData={eventsData}
               expensesData={expensesData}
               setData={setData}

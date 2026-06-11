@@ -41,6 +41,7 @@ import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { ArtistsDataSource } from "../hooks/useArtistsData";
+import type { EventFilesDataSource } from "../hooks/useEventFilesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { ExpensesDataSource } from "../hooks/useExpensesData";
 import type { SponsorsDataSource } from "../hooks/useSponsorsData";
@@ -49,6 +50,10 @@ import type { TicketingDataSource } from "../hooks/useTicketingData";
 import type { TimelineDataSource } from "../hooks/useTimelineData";
 import type { VendorsDataSource } from "../hooks/useVendorsData";
 import type { ActivityWriteInput } from "../lib/activitiesRepository";
+import {
+  EVENT_FILE_MAX_SIZE,
+  getAllowedEventFileMimeType,
+} from "../lib/eventFilesRepository";
 import type { ExpenseRecord } from "../lib/expensesRepository";
 import type {
   CheckInStatus,
@@ -68,6 +73,7 @@ interface EventDetailProps {
   activitiesData: ActivitiesDataSource;
   artistsData: ArtistsDataSource;
   data: EventOSData;
+  eventFilesData: EventFilesDataSource;
   eventsData: EventsDataSource;
   expensesData: ExpensesDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
@@ -129,6 +135,7 @@ export default function EventDetail({
   activitiesData,
   artistsData,
   data,
+  eventFilesData,
   eventsData,
   expensesData,
   setData,
@@ -145,6 +152,8 @@ export default function EventDetail({
   const [activityWarning, setActivityWarning] = useState(() => getNavigationActivityWarning(location.state));
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<{ group: FormGroup; id: string } | null>(null);
+  const [fileActionId, setFileActionId] = useState<string | null>(null);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [notesDraft, setNotesDraft] = useState(event?.notes ?? "");
   const lastSavedNotesRef = useRef(event?.notes ?? "");
   const notesSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -346,13 +355,53 @@ export default function EventDetail({
     }));
   };
 
-  const uploadFile = (changeEvent: ChangeEvent<HTMLInputElement>) => {
+  const uploadFile = async (changeEvent: ChangeEvent<HTMLInputElement>) => {
+    const input = changeEvent.currentTarget;
     const file = changeEvent.target.files?.[0];
     if (!file) return;
 
+    if (eventFilesData.isSupabaseMode) {
+      if (!getAllowedEventFileMimeType(file)) {
+        setError("Only PDF, JPG, PNG and DOCX files can be uploaded.");
+        input.value = "";
+        return;
+      }
+      if (file.size > EVENT_FILE_MAX_SIZE) {
+        setError("Event files must be 10 MB or smaller.");
+        input.value = "";
+        return;
+      }
+
+      eventFilesData.clearError();
+      setIsUploadingFile(true);
+      setError("");
+      try {
+        const uploadedFile = await eventFilesData.uploadFile(eventId, file);
+        await recordActivity({
+          entity: "Files",
+          entityId: uploadedFile.id,
+          eventId,
+          message: `Uploaded file ${uploadedFile.name}`,
+          metadata: {
+            action: "uploaded",
+            fileName: uploadedFile.name,
+            fileType: uploadedFile.fileType,
+            source: "event-detail",
+          },
+          type: "File",
+        });
+        input.value = "";
+      } catch (uploadError) {
+        setError(getErrorMessage(uploadError, "Unable to upload the event file."));
+      } finally {
+        setIsUploadingFile(false);
+      }
+      return;
+    }
+
     if (!isAllowedFile(file)) {
       setError("Only PDF, JPG, PNG and DOCX files can be uploaded.");
-      changeEvent.target.value = "";
+      input.value = "";
       return;
     }
 
@@ -379,7 +428,7 @@ export default function EventDetail({
         activities: [{ id: `activity-${Date.now()}`, message: `Uploaded file ${file.name}`, entity: "Events", time: "Just now", type: "Event" }, ...current.activities],
       }));
       setError("");
-      changeEvent.target.value = "";
+      input.value = "";
     };
     reader.readAsDataURL(file);
   };
@@ -397,14 +446,81 @@ export default function EventDetail({
     }));
   };
 
-  const deleteFile = (fileId: string) => {
+  const viewEventFile = async (file: EventFile) => {
+    if (!eventFilesData.isSupabaseMode) {
+      viewLocalFile(file.dataUrl);
+      return;
+    }
+
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      setError("Your browser blocked the file preview window. Allow pop-ups and try again.");
+      return;
+    }
+    popup.opener = null;
+
+    eventFilesData.clearError();
+    setFileActionId(`view-${file.id}`);
+    setError("");
+    try {
+      const signedUrl = await eventFilesData.createViewUrl(file);
+      popup.location.replace(signedUrl);
+    } catch (viewError) {
+      popup.close();
+      setError(getErrorMessage(viewError, "Unable to open the event file."));
+    } finally {
+      setFileActionId(null);
+    }
+  };
+
+  const downloadEventFile = async (file: EventFile) => {
+    if (!eventFilesData.isSupabaseMode) {
+      downloadLocalFile(file);
+      return;
+    }
+
+    eventFilesData.clearError();
+    setFileActionId(`download-${file.id}`);
+    setError("");
+    try {
+      const signedUrl = await eventFilesData.createDownloadUrl(file);
+      const anchor = document.createElement("a");
+      anchor.href = signedUrl;
+      anchor.download = file.name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (downloadError) {
+      setError(getErrorMessage(downloadError, "Unable to download the event file."));
+    } finally {
+      setFileActionId(null);
+    }
+  };
+
+  const deleteFile = async (file: EventFile) => {
+    if (eventFilesData.isSupabaseMode) {
+      eventFilesData.clearError();
+      setFileActionId(`delete-${file.id}`);
+      setError("");
+      try {
+        await eventFilesData.deleteFile(file);
+      } catch (deleteError) {
+        setError(getErrorMessage(deleteError, "Unable to delete the event file."));
+      } finally {
+        setFileActionId(null);
+      }
+      return;
+    }
+
     setData((current) => ({
       ...current,
       events: current.events.map((item) =>
-        item.id === eventId ? { ...item, files: item.files.filter((file) => file.id !== fileId) } : item,
+        item.id === eventId ? { ...item, files: item.files.filter((itemFile) => itemFile.id !== file.id) } : item,
       ),
     }));
   };
+
+  const visibleError = error || (eventFilesData.isSupabaseMode ? eventFilesData.error ?? "" : "");
 
   return (
     <div className="space-y-4">
@@ -427,7 +543,7 @@ export default function EventDetail({
         <EventKpi title="Sponsor Revenue" value={formatCurrency(scoped.sponsorRevenue)} helper="Payment received deals" icon={BriefcaseBusiness} />
       </section>
 
-      {error && <p className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">{error}</p>}
+      {visibleError && <p className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">{visibleError}</p>}
       {activityWarning && <p className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-3 py-2 text-sm text-amber-100">{activityWarning}</p>}
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -714,10 +830,15 @@ export default function EventDetail({
         <WorkspacePanel title="Event Files" icon={FileText}>
           <label className="mb-4 block rounded-lg border border-dashed border-white/15 bg-white/[0.035] p-4 transition hover:border-app-primary/35 hover:bg-app-primary/10">
             <span className="text-sm font-medium text-white">Upload event file</span>
-            <span className="mt-1 block text-xs text-app-muted">PDF, JPG, PNG or DOCX. Stored locally in this browser.</span>
+            <span className="mt-1 block text-xs text-app-muted">
+              {eventFilesData.isSupabaseMode
+                ? "PDF, JPG, PNG or DOCX, up to 10 MB. Stored securely in your workspace."
+                : "PDF, JPG, PNG or DOCX. Stored locally in this browser."}
+            </span>
             <input
               accept=".pdf,.jpg,.jpeg,.png,.docx,application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="mt-3 block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-app-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-500"
+              disabled={isUploadingFile}
               onChange={uploadFile}
               type="file"
             />
@@ -729,13 +850,13 @@ export default function EventDetail({
                 <div className="min-w-0">
                   <p className="break-words text-sm font-medium text-white">{file.name}</p>
                   <p className="mt-1 break-words text-xs text-app-muted">
-                    {file.fileType} - Uploaded {new Date(file.uploadDate).toLocaleDateString("en-IN")} - {formatFileSize(file.size)}
+                    {getFileTypeDisplay(file)} - Uploaded {new Date(file.uploadDate).toLocaleDateString("en-IN")} - {formatFileSize(file.size)}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
-                  <FileAction label="View" icon={Eye} onClick={() => viewFile(file.dataUrl)} />
-                  <FileAction label="Download" icon={Download} onClick={() => downloadFile(file)} />
-                  <button className="grid h-9 w-9 place-items-center rounded-lg border border-app-danger/30 bg-app-danger/10 text-red-200 transition hover:bg-app-danger/20" onClick={() => deleteFile(file.id)} type="button">
+                  <FileAction disabled={fileActionId !== null} label="View" icon={Eye} onClick={() => void viewEventFile(file)} />
+                  <FileAction disabled={fileActionId !== null} label="Download" icon={Download} onClick={() => void downloadEventFile(file)} />
+                  <button className="grid h-9 w-9 place-items-center rounded-lg border border-app-danger/30 bg-app-danger/10 text-red-200 transition hover:bg-app-danger/20 disabled:cursor-not-allowed disabled:opacity-50" disabled={fileActionId !== null} onClick={() => void deleteFile(file)} type="button">
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -914,9 +1035,19 @@ function Select({ label, value, onChange, options }: { label: string; value: str
   );
 }
 
-function FileAction({ label, icon: Icon, onClick }: { label: string; icon: typeof Eye; onClick: () => void }) {
+function FileAction({
+  disabled = false,
+  label,
+  icon: Icon,
+  onClick,
+}: {
+  disabled?: boolean;
+  label: string;
+  icon: typeof Eye;
+  onClick: () => void;
+}) {
   return (
-    <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/[0.08]" onClick={onClick} title={label} type="button">
+    <button className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50" disabled={disabled} onClick={onClick} title={label} type="button">
       <Icon size={15} />
     </button>
   );
@@ -1043,6 +1174,11 @@ function formatFileSize(size?: number) {
   if (!size) return "Size unavailable";
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileTypeDisplay(file: EventFile) {
+  const extension = file.name.split(".").pop()?.toUpperCase();
+  return extension || file.fileType || "File";
 }
 
 type CloudReadyGroup = "ticket" | "sponsor" | "artist" | "vendor" | "expense" | "task" | "timeline";
@@ -1321,12 +1457,12 @@ function getNavigationActivityWarning(state: unknown) {
   return typeof state.activityWarning === "string" ? state.activityWarning : "";
 }
 
-function viewFile(dataUrl?: string) {
+function viewLocalFile(dataUrl?: string) {
   if (!dataUrl) return;
   window.open(dataUrl, "_blank", "noopener,noreferrer");
 }
 
-function downloadFile(file: EventFile) {
+function downloadLocalFile(file: EventFile) {
   if (!file.dataUrl) return;
   const anchor = document.createElement("a");
   anchor.href = file.dataUrl;
