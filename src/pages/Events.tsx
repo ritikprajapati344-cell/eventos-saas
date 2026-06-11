@@ -246,17 +246,23 @@ export default function Events({ activitiesData, data, eventFilesData, eventsDat
       setIsSaving(true);
       setActionError("");
       try {
-        await eventFilesData.removeEventStorageObjects(event.id);
-        await eventsData.deleteEvent(event.id);
+        const deletion = await eventsData.deleteEvent(event.id);
         eventFilesData.forgetEventFiles(event.id);
         await recordActivity({
           entity: "Events",
           entityId: event.id,
           message: `Deleted event ${event.name}`,
-          metadata: { action: "deleted", eventName: event.name, source: "events" },
+          metadata: {
+            action: "deleted",
+            eventName: event.name,
+            queuedFileCount: deletion.queuedFileCount,
+            source: "events",
+          },
           type: "Event",
         });
-        showToast("Event deleted successfully.");
+        showToast(deletion.queuedFileCount > 0
+          ? `Event deleted. ${deletion.queuedFileCount} file cleanup ${deletion.queuedFileCount === 1 ? "job is" : "jobs are"} queued and pending.`
+          : "Event deleted successfully. No file cleanup was required.");
       } catch (deleteError) {
         setActionError(getErrorMessage(deleteError, "Unable to delete the event."));
       } finally {

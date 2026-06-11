@@ -18,6 +18,11 @@ export interface EventWriteInput {
   venue: string;
 }
 
+export interface SafeEventDeletionResult {
+  deletedEventId: string;
+  queuedFileCount: number;
+}
+
 interface EventRow {
   archived: boolean;
   capacity: number;
@@ -101,13 +106,25 @@ export async function updateWorkspaceEventNotes(
 
 export async function deleteWorkspaceEvent(workspaceId: string, eventId: string) {
   const client = requireSupabase();
-  const { error } = await client
-    .from("events")
-    .delete()
-    .eq("workspace_id", workspaceId)
-    .eq("id", eventId);
+  const { data, error } = await client
+    .rpc("delete_event_safely", { target_event_id: eventId })
+    .single();
 
   if (error) throw error;
+
+  const result = data as {
+    deleted_event_id: string;
+    queued_file_count: number;
+  };
+
+  if (result.deleted_event_id !== eventId) {
+    throw new Error("Supabase returned an unexpected deleted event ID.");
+  }
+
+  return {
+    deletedEventId: result.deleted_event_id,
+    queuedFileCount: Number(result.queued_file_count),
+  } satisfies SafeEventDeletionResult;
 }
 
 function toEventRow(workspaceId: string, input: EventWriteInput) {

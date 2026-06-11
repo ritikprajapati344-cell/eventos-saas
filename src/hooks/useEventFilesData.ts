@@ -3,7 +3,6 @@ import {
   createEventFileSignedUrl,
   deleteWorkspaceEventFile,
   listWorkspaceEventFiles,
-  removeWorkspaceEventStorageObjects,
   uploadWorkspaceEventFile,
 } from "../lib/eventFilesRepository";
 import { supabaseConfiguration } from "../lib/supabase";
@@ -19,7 +18,6 @@ export interface EventFilesDataSource {
   forgetEventFiles: (eventId: string) => void;
   isLoading: boolean;
   isSupabaseMode: boolean;
-  removeEventStorageObjects: (eventId: string) => Promise<void>;
   uploadFile: (eventId: string, file: File) => Promise<EventFile>;
 }
 
@@ -140,17 +138,6 @@ export function useEventFilesData(
     }
   }, [requireWorkspace]);
 
-  const removeEventStorageObjects = useCallback(async (eventId: string) => {
-    setError(null);
-    try {
-      await removeWorkspaceEventStorageObjects(requireWorkspace(), eventId);
-    } catch (cleanupError) {
-      const message = getErrorMessage(cleanupError, "Unable to clean up the event files from Storage.");
-      setError(message);
-      throw new Error(message);
-    }
-  }, [requireWorkspace]);
-
   const forgetEventFiles = useCallback((eventId: string) => {
     setFiles((current) => current.filter((file) => file.eventId !== eventId));
   }, []);
@@ -165,7 +152,6 @@ export function useEventFilesData(
     forgetEventFiles,
     isLoading,
     isSupabaseMode,
-    removeEventStorageObjects,
     uploadFile,
   };
 }

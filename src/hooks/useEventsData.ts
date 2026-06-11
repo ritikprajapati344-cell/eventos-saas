@@ -6,6 +6,7 @@ import {
   updateWorkspaceEvent,
   updateWorkspaceEventNotes,
   type EventWriteInput,
+  type SafeEventDeletionResult,
 } from "../lib/eventsRepository";
 import { supabaseConfiguration } from "../lib/supabase";
 import type { EventItem } from "../types";
@@ -13,7 +14,7 @@ import type { EventItem } from "../types";
 export interface EventsDataSource {
   clearError: () => void;
   createEvent: (input: EventWriteInput) => Promise<EventItem>;
-  deleteEvent: (eventId: string) => Promise<void>;
+  deleteEvent: (eventId: string) => Promise<SafeEventDeletionResult>;
   error: string | null;
   events: EventItem[];
   isLoading: boolean;
@@ -119,8 +120,9 @@ export function useEventsData(workspaceId: string | null): EventsDataSource {
   const deleteEvent = useCallback(async (eventId: string) => {
     setError(null);
     try {
-      await deleteWorkspaceEvent(requireWorkspace(), eventId);
+      const result = await deleteWorkspaceEvent(requireWorkspace(), eventId);
       setEvents((current) => current.filter((event) => event.id !== eventId));
+      return result;
     } catch (deleteError) {
       const message = getErrorMessage(deleteError, "Unable to delete the event from Supabase.");
       setError(message);

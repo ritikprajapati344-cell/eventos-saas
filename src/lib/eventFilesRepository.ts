@@ -138,35 +138,6 @@ export async function deleteWorkspaceEventFile(
   if (error) throw error;
 }
 
-export async function removeWorkspaceEventStorageObjects(
-  workspaceId: string,
-  eventId: string,
-) {
-  const client = requireSupabase();
-  const { data, error } = await client
-    .from("event_files")
-    .select(eventFileColumns)
-    .eq("workspace_id", workspaceId)
-    .eq("event_id", eventId);
-
-  if (error) throw error;
-
-  const files = (data as EventFileRow[]).map(mapEventFileRow);
-  const pathsByBucket = new Map<string, string[]>();
-
-  for (const file of files) {
-    if (!file.storagePath) continue;
-    const bucketPaths = pathsByBucket.get(file.storageBucket ?? EVENT_FILES_BUCKET) ?? [];
-    bucketPaths.push(file.storagePath);
-    pathsByBucket.set(file.storageBucket ?? EVENT_FILES_BUCKET, bucketPaths);
-  }
-
-  for (const [bucket, paths] of pathsByBucket) {
-    const storageError = await removeStorageObjects(bucket, paths);
-    if (storageError) throw storageError;
-  }
-}
-
 export function getAllowedEventFileMimeType(file: File) {
   if (allowedMimeTypes.has(file.type)) return file.type;
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
