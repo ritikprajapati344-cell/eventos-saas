@@ -10,14 +10,7 @@ export type SponsorStatus =
 export type PaymentStatus = "Pending" | "Partial" | "Paid";
 export type ContractStatus = "Draft" | "Sent" | "Signed" | "On Hold";
 export type VendorCategory = "Sound" | "Light" | "Stage" | "Decoration" | "Security" | "Food";
-export type ExpenseCategory =
-  | "Venue"
-  | "Artist"
-  | "Marketing"
-  | "Sound"
-  | "Lighting"
-  | "Food"
-  | "Security";
+export type ExpenseCategory = string;
 export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done";
 export type TaskPriority = "High" | "Medium" | "Low";
 export type CheckInStatus = "Not Started" | "Active" | "Sold Out";

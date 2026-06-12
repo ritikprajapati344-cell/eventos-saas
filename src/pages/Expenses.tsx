@@ -10,7 +10,13 @@ import type {
   ExpenseRecord as ManagedExpense,
   ExpenseWriteInput,
 } from "../lib/expensesRepository";
-import type { EventOSData, ExpenseCategory, Vendor } from "../types";
+import type { EventOSData, Vendor } from "../types";
+import {
+  CUSTOM_EXPENSE_CATEGORY_OPTION,
+  EXPENSE_CATEGORY_OPTIONS,
+  getExpenseCategoryFormValues,
+  resolveExpenseCategory,
+} from "../utils/expenseCategories";
 import { formatCurrency } from "../utils/finance";
 
 interface ExpensesProps {
@@ -20,7 +26,8 @@ interface ExpensesProps {
 
 type ExpenseForm = {
   amount: string;
-  category: ExpenseCategory;
+  category: string;
+  customCategory: string;
   date: string;
   description: string;
   notes: string;
@@ -32,11 +39,11 @@ type ExpenseFormErrors = Partial<Record<keyof ExpenseForm, string>>;
 
 const STORAGE_KEY = "eventos-demo-data-v2";
 const directExpenseValue = "__direct_expense__";
-const expenseCategories: ExpenseCategory[] = ["Venue", "Artist", "Marketing", "Sound", "Lighting", "Food", "Security"];
 
 const initialForm: ExpenseForm = {
   amount: "",
   category: "Marketing",
+  customCategory: "",
   date: new Date().toISOString().slice(0, 10),
   description: "",
   notes: "",
@@ -105,7 +112,7 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
     setErrors({});
     setForm({
       amount: String(expense.amount),
-      category: expense.category,
+      ...getExpenseCategoryFormValues(expense.category),
       date: expense.date,
       description: expense.description,
       notes: expense.notes ?? "",
@@ -351,9 +358,14 @@ function ExpenseModal({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field error={errors.category} label="Category">
             <select className="dashboard-input" onChange={(event) => onChange("category", event.target.value)} value={form.category}>
-              {expenseCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+              {EXPENSE_CATEGORY_OPTIONS.map((category) => <option key={category} value={category}>{category}</option>)}
             </select>
           </Field>
+          {form.category === CUSTOM_EXPENSE_CATEGORY_OPTION && (
+            <Field error={errors.customCategory} label="Custom Category">
+              <input className="dashboard-input" onChange={(event) => onChange("customCategory", event.target.value)} value={form.customCategory} />
+            </Field>
+          )}
           <Field error={errors.description} label="Description"><input className="dashboard-input" onChange={(event) => onChange("description", event.target.value)} value={form.description} /></Field>
           <Field error={errors.amount} label="Amount"><input className="dashboard-input" min={0} onChange={(event) => onChange("amount", event.target.value)} type="number" value={form.amount} /></Field>
           <Field error={errors.date} label="Date"><input className="dashboard-input" onChange={(event) => onChange("date", event.target.value)} type="date" value={form.date} /></Field>
@@ -436,21 +448,10 @@ function getExpenseTotals(expenses: ManagedExpense[]) {
 }
 
 function getCategoryTotals(expenses: ManagedExpense[]) {
-  return expenses.reduce<Record<ExpenseCategory, number>>(
-    (acc, expense) => {
-      acc[expense.category] += expense.amount;
-      return acc;
-    },
-    {
-      Venue: 0,
-      Artist: 0,
-      Marketing: 0,
-      Sound: 0,
-      Lighting: 0,
-      Food: 0,
-      Security: 0,
-    },
-  );
+  return expenses.reduce<Record<string, number>>((acc, expense) => {
+    acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
+    return acc;
+  }, {});
 }
 
 function getLargestExpense(expenses: ManagedExpense[]) {
@@ -465,6 +466,9 @@ function validateExpenseForm(form: ExpenseForm) {
   const amount = Number(form.amount);
 
   if (!form.category) errors.category = "Category is required.";
+  if (form.category === CUSTOM_EXPENSE_CATEGORY_OPTION && !form.customCategory.trim()) {
+    errors.customCategory = "Custom category is required.";
+  }
   if (!form.description.trim()) errors.description = "Description is required.";
   if (!form.amount.trim()) errors.amount = "Amount is required.";
   if (form.amount.trim() && (Number.isNaN(amount) || amount <= 0)) errors.amount = "Amount must be greater than 0.";
@@ -476,7 +480,7 @@ function validateExpenseForm(form: ExpenseForm) {
 function makeExpensePayload(form: ExpenseForm): Omit<ManagedExpense, "id"> {
   return {
     amount: Number(form.amount),
-    category: form.category,
+    category: resolveExpenseCategory(form.category, form.customCategory),
     date: form.date,
     description: form.description.trim(),
     notes: form.notes.trim(),

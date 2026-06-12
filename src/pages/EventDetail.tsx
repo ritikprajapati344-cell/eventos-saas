@@ -60,13 +60,18 @@ import type {
   ContractStatus,
   EventFile,
   EventOSData,
-  ExpenseCategory,
   PaymentStatus,
   SponsorStatus,
   TaskPriority,
   TaskStatus,
   VendorCategory,
 } from "../types";
+import {
+  CUSTOM_EXPENSE_CATEGORY_OPTION,
+  EXPENSE_CATEGORY_OPTIONS,
+  getExpenseCategoryFormValues,
+  resolveExpenseCategory,
+} from "../utils/expenseCategories";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 interface EventDetailProps {
@@ -89,7 +94,6 @@ type FormGroup = keyof typeof initialForms;
 const sponsorStages: SponsorStatus[] = ["Lead", "Contacted", "Proposal Sent", "Negotiation", "Closed Won", "Closed Lost"];
 const ticketPresets = ["Sofa", "Gold", "Silver", "Custom"];
 const vendorCategories: VendorCategory[] = ["Sound", "Light", "Stage", "Decoration", "Security", "Food"];
-const expenseCategories: ExpenseCategory[] = ["Venue", "Artist", "Marketing", "Sound", "Lighting", "Food", "Security"];
 const riderStatuses = ["Pending", "Received", "Approved"];
 const contractStatuses = ["Draft", "Sent", "Signed", "On Hold"];
 const paymentStatuses = ["Pending", "Partial", "Paid"];
@@ -118,7 +122,7 @@ const initialForms = {
     paymentStatus: "Pending",
   },
   vendor: { name: "", category: "Sound", amount: "", advancePaid: "0", status: "Pending", dueDate: "2026-06-15" },
-  expense: { category: "Marketing", description: "", amount: "", date: "2026-06-15" },
+  expense: { category: "Marketing", customCategory: "", description: "", amount: "", date: "2026-06-15" },
   file: { name: "", fileType: "PDF", uploadDate: "2026-06-15" },
   timeline: { title: "", description: "", date: "2026-06-15", status: "Upcoming" },
   task: { title: "", owner: "Ops", dueDate: "2026-06-15", priority: "Medium", status: "Open" },
@@ -722,7 +726,10 @@ export default function EventDetail({
       <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <WorkspacePanel title="Expenses" icon={WalletCards}>
           <CompactForm onCancel={editing?.group === "expense" ? cancelEdit : undefined} onSubmit={(event) => saveGroup("expense", event)} submitLabel={editing?.group === "expense" ? "Update Expense" : "Add"}>
-            <Select label="Category" value={forms.expense.category} onChange={(value) => updateForm("expense", "category", value)} options={expenseCategories} />
+            <Select label="Category" value={forms.expense.category} onChange={(value) => updateForm("expense", "category", value)} options={EXPENSE_CATEGORY_OPTIONS} />
+            {forms.expense.category === CUSTOM_EXPENSE_CATEGORY_OPTION && (
+              <Input label="Custom Category" value={forms.expense.customCategory} onChange={(value) => updateForm("expense", "customCategory", value)} />
+            )}
             <Input label="Description" value={forms.expense.description} onChange={(value) => updateForm("expense", "description", value)} />
             <Input label="Amount" type="number" value={forms.expense.amount} onChange={(value) => updateForm("expense", "amount", value)} />
             <Input label="Date" type="date" value={forms.expense.date} onChange={(value) => updateForm("expense", "date", value)} />
@@ -736,7 +743,7 @@ export default function EventDetail({
               rows: [["Amount", formatCurrency(expense.amount)]],
               badges: [{ label: expense.category, tone: "amber" }],
               onEdit: () => startEdit("expense", expense.id, {
-                category: expense.category,
+                ...getExpenseCategoryFormValues(expense.category),
                 description: expense.description,
                 amount: String(expense.amount),
                 date: expense.date,
@@ -1355,7 +1362,7 @@ async function saveSupabaseGroup(context: SupabaseSaveContext) {
       : undefined;
     const input = {
       amount: Number(form.amount),
-      category: form.category as ExpenseCategory,
+      category: resolveExpenseCategory(form.category, form.customCategory),
       date: form.date,
       description: form.description.trim(),
       eventId: existingExpense?.eventId ?? eventId,
@@ -1484,6 +1491,10 @@ function validateGroup(group: FormGroup, form: Record<string, string>, existingT
 
   for (const field of required[group]) {
     if (!form[field]?.trim()) return "Please fill all required fields.";
+  }
+
+  if (group === "expense" && form.category === CUSTOM_EXPENSE_CATEGORY_OPTION && !form.customCategory?.trim()) {
+    return "Custom expense category is required.";
   }
 
   for (const [field, value] of Object.entries(form)) {
@@ -1743,7 +1754,13 @@ function applyEventUpdate(data: EventOSData, eventId: string, group: FormGroup, 
   }
 
   if (group === "expense") {
-    const expense = { eventId, category: form.category as ExpenseCategory, description: form.description.trim(), amount: Number(form.amount), date: form.date };
+    const expense = {
+      eventId,
+      category: resolveExpenseCategory(form.category, form.customCategory),
+      description: form.description.trim(),
+      amount: Number(form.amount),
+      date: form.date,
+    };
     if (editId) {
       return {
         ...data,
