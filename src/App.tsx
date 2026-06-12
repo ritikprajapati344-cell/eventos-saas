@@ -77,7 +77,19 @@ function AuthenticatedApp() {
   return (
     <AppLayout data={data}>
       <Routes>
-        <Route path="/" element={<Dashboard data={data} isSupabaseMode={eventsData.isSupabaseMode} setData={setData} />} />
+        <Route
+          path="/"
+          element={(
+            <Dashboard
+              data={data}
+              financeError={financeData.error}
+              financeTransactions={financeData.transactions}
+              isFinanceLoading={financeData.isLoading}
+              isSupabaseMode={eventsData.isSupabaseMode}
+              setData={setData}
+            />
+          )}
+        />
         <Route path="/events" element={<Events activitiesData={activitiesData} data={data} eventFilesData={eventFilesData} eventsData={eventsData} setData={setData} />} />
         <Route
           path="/events/:eventId"

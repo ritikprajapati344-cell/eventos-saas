@@ -14,24 +14,29 @@ import {
   YAxis,
 } from "recharts";
 import {
+  Activity,
   BadgeIndianRupee,
   BriefcaseBusiness,
   CalendarDays,
   CircleDollarSign,
+  ClipboardList,
   Mic2,
   Plus,
   ReceiptIndianRupee,
   ShieldCheck,
+  TicketX,
   TrendingUp,
   WalletCards,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { monthlyProfit, revenueTrend } from "../data/demoData";
+import type { FinanceTransactionRecord } from "../lib/financeTransactionsRepository";
 import type {
   ContractStatus,
   EventOSData,
@@ -54,9 +59,17 @@ import {
   getTotalExpenses,
   getTotalRevenue,
 } from "../utils/finance";
+import {
+  buildCloudFinanceTrends,
+  buildCloudForecast,
+  buildCloudTicketSales,
+} from "../utils/dashboardAnalytics";
 
 interface DashboardProps {
   data: EventOSData;
+  financeError: string | null;
+  financeTransactions: FinanceTransactionRecord[];
+  isFinanceLoading: boolean;
   isSupabaseMode: boolean;
   setData: Dispatch<SetStateAction<EventOSData>>;
 }
@@ -143,7 +156,14 @@ const initialForms: Record<QuickAction, Record<string, string>> = {
   },
 };
 
-export default function Dashboard({ data, isSupabaseMode, setData }: DashboardProps) {
+export default function Dashboard({
+  data,
+  financeError,
+  financeTransactions,
+  isFinanceLoading,
+  isSupabaseMode,
+  setData,
+}: DashboardProps) {
   const [activeAction, setActiveAction] = useState<QuickAction | null>(null);
   const [forms, setForms] = useState(initialForms);
   const [error, setError] = useState("");
@@ -157,16 +177,25 @@ export default function Dashboard({ data, isSupabaseMode, setData }: DashboardPr
   const sponsorsClosed = data.sponsors.filter((sponsor) => sponsor.status === "Closed Won").length;
   const activeEvents = data.events.filter((event) => !event.archived && (event.status === "Planning" || event.status === "Upcoming" || event.status === "Ongoing")).length;
 
-  const ticketSalesData = useMemo(
-    () =>
-      data.events.slice(0, 5).map((event) => ({
-        event: makeChartLabel(event.name),
-        fullName: event.name,
-        sold: event.ticketsSold,
-        capacity: event.capacity,
-      })),
-    [data.events],
+  const ticketSalesData = useMemo(() => {
+    if (isSupabaseMode) return buildCloudTicketSales(data);
+    return data.events.slice(0, 5).map((event) => ({
+      event: makeChartLabel(event.name),
+      fullName: event.name,
+      sold: event.ticketsSold,
+      capacity: event.capacity,
+      revenue: event.ticketsSold * event.ticketPrice,
+    }));
+  }, [data, isSupabaseMode]);
+
+  const cloudForecast = useMemo(() => buildCloudForecast(data), [data]);
+  const cloudFinanceTrends = useMemo(
+    () => buildCloudFinanceTrends(financeTransactions),
+    [financeTransactions],
   );
+  const forecastData = isSupabaseMode ? cloudForecast : data.revenueForecast;
+  const revenueTrendData = isSupabaseMode ? cloudFinanceTrends.revenueTrend : revenueTrend;
+  const monthlyProfitData = isSupabaseMode ? cloudFinanceTrends.monthlyProfit : monthlyProfit;
 
   const pipelineData = sponsorStages.map((stage) => ({
     stage,
@@ -175,6 +204,7 @@ export default function Dashboard({ data, isSupabaseMode, setData }: DashboardPr
       .filter((sponsor) => sponsor.status === stage)
       .reduce((total, sponsor) => total + sponsor.sponsorshipAmount, 0),
   }));
+  const pipelineMaxCount = Math.max(...pipelineData.map((item) => item.count), 0);
 
   const calendar = useMemo(() => buildCalendar(data), [data]);
 
@@ -222,6 +252,17 @@ export default function Dashboard({ data, isSupabaseMode, setData }: DashboardPr
         .sort((a, b) => Number(b.time === "Just now") - Number(a.time === "Just now"))
         .slice(0, 5),
     [data.activities],
+  );
+  const visibleTasks = useMemo(
+    () => (
+      isSupabaseMode
+        ? [...data.tasks]
+            .filter((task) => task.status !== "Done")
+            .sort((left, right) => left.dueDate.localeCompare(right.dueDate))
+            .slice(0, 4)
+        : data.tasks.slice(0, 4)
+    ),
+    [data.tasks, isSupabaseMode],
   );
 
   return (
@@ -271,13 +312,19 @@ export default function Dashboard({ data, isSupabaseMode, setData }: DashboardPr
       </section>
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <ChartCard title="Revenue Forecast" subtitle="Actual revenue against forecasted commercial plan">
-          {isSupabaseMode ? (
-            <ChartEmptyState message="Revenue forecast data is not available in cloud mode yet." />
+        <ChartCard
+          title="Revenue Forecast"
+          subtitle={isSupabaseMode ? "Expected event revenue against linked ticket and sponsor revenue" : "Actual revenue against forecasted commercial plan"}
+        >
+          {forecastData.length === 0 ? (
+            <ChartEmptyState
+              icon={TrendingUp}
+              message={isSupabaseMode ? "Add event expectations, ticket sales, or won sponsors to build the forecast." : "No forecast data available."}
+            />
           ) : (
             <ChartBox height="h-[220px] sm:h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data.revenueForecast} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <LineChart data={forecastData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
                   <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
                   <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
@@ -292,45 +339,53 @@ export default function Dashboard({ data, isSupabaseMode, setData }: DashboardPr
 
         <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-1">
           <Widget title="Recent Activities">
-            <div className="space-y-2">
-              {activities.map((activity) => (
-                <div key={activity.id} className="flex min-w-0 gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3">
-                  <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-app-primary" />
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <p className="break-words text-sm font-medium leading-5 text-white">{activity.message}</p>
-                      {activity.time === "Just now" && <StatusBadge label="New" tone="green" />}
+            {activities.length === 0 ? (
+              <WidgetEmptyState icon={Activity} message="Workspace activity will appear here after your first update." />
+            ) : (
+              <div className="space-y-2">
+                {activities.map((activity) => (
+                  <div key={activity.id} className="flex min-w-0 gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                    <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-app-primary" />
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="break-words text-sm font-medium leading-5 text-white">{activity.message}</p>
+                        {activity.time === "Just now" && <StatusBadge label="New" tone="green" />}
+                      </div>
+                      <p className="mt-1 text-xs text-app-muted">{activity.entity} - {activity.time}</p>
                     </div>
-                    <p className="mt-1 text-xs text-app-muted">{activity.entity} - {activity.time}</p>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </Widget>
 
           <Widget title="Upcoming Tasks">
-            <div className="space-y-2">
-              {data.tasks.slice(0, 4).map((task) => {
+            {visibleTasks.length === 0 ? (
+              <WidgetEmptyState icon={ClipboardList} message="No upcoming tasks. Add tasks from an event workspace." />
+            ) : (
+              <div className="space-y-2">
+                {visibleTasks.map((task) => {
                 const linkedEvent = data.events.find((event) => event.id === task.eventId);
                 return (
-                <div key={task.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-                  <div className="flex flex-col items-start justify-between gap-2 min-[430px]:flex-row min-[430px]:gap-3">
-                    <div className="min-w-0">
-                      <p className="line-clamp-2 text-sm font-medium leading-5 text-white">{task.title}</p>
-                      <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-[0.12em] text-app-muted">{linkedEvent?.name ?? "Event task"}</p>
+                  <div key={task.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                    <div className="flex flex-col items-start justify-between gap-2 min-[430px]:flex-row min-[430px]:gap-3">
+                      <div className="min-w-0">
+                        <p className="line-clamp-2 text-sm font-medium leading-5 text-white">{task.title}</p>
+                        <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-[0.12em] text-app-muted">{linkedEvent?.name ?? "Event task"}</p>
+                      </div>
+                      <div className="flex shrink-0 flex-row flex-wrap gap-1 min-[430px]:flex-col min-[430px]:items-end">
+                        <StatusBadge label={task.priority} tone={priorityTone[task.priority]} />
+                        <StatusBadge label={task.status} tone={taskStatusTone[task.status]} />
+                      </div>
                     </div>
-                    <div className="flex shrink-0 flex-row flex-wrap gap-1 min-[430px]:flex-col min-[430px]:items-end">
-                      <StatusBadge label={task.priority} tone={priorityTone[task.priority]} />
-                      <StatusBadge label={task.status} tone={taskStatusTone[task.status]} />
-                    </div>
+                    <p className="mt-2 text-xs text-app-muted">
+                      {task.owner} - Due {new Date(task.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                    </p>
                   </div>
-                  <p className="mt-2 text-xs text-app-muted">
-                    {task.owner} - Due {new Date(task.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                  </p>
-                </div>
-              );
-              })}
-            </div>
+                );
+                })}
+              </div>
+            )}
           </Widget>
         </div>
       </section>
@@ -381,46 +436,67 @@ export default function Dashboard({ data, isSupabaseMode, setData }: DashboardPr
         </Widget>
 
         <Widget title="Sponsor Pipeline Summary">
-          <div className="space-y-2">
-            {pipelineData.map((item, index) => (
-              <div key={item.stage} className="rounded-lg border border-white/10 bg-white/[0.035] p-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="font-medium text-white">{item.stage}</span>
-                  <span className="break-words text-right text-app-muted">{item.count} - {formatCurrency(item.value)}</span>
-                </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
-                  <div className="h-full rounded-full bg-app-primary" style={{ width: `${Math.max(18, 100 - index * 12)}%` }} />
-                </div>
+          {isSupabaseMode && data.sponsors.length === 0 ? (
+            <WidgetEmptyState icon={BriefcaseBusiness} message="No sponsor opportunities yet. Add sponsors from the CRM pipeline." />
+          ) : (
+            <>
+              <div className="space-y-2">
+                {pipelineData.map((item, index) => (
+                  <div key={item.stage} className="rounded-lg border border-white/10 bg-white/[0.035] p-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-medium text-white">{item.stage}</span>
+                      <span className="break-words text-right text-app-muted">{item.count} - {formatCurrency(item.value)}</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-app-primary transition-[width]"
+                        style={{
+                          width: isSupabaseMode
+                            ? `${pipelineMaxCount > 0 ? (item.count / pipelineMaxCount) * 100 : 0}%`
+                            : `${Math.max(18, 100 - index * 12)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-app-muted">Open pipeline value: {formatCurrency(getPipelineValue(data.sponsors))}</p>
+              <p className="mt-3 text-xs text-app-muted">Open pipeline value: {formatCurrency(getPipelineValue(data.sponsors))}</p>
+            </>
+          )}
         </Widget>
 
         <Widget title="Ticket Sales Summary">
-          <ChartBox height="h-[220px] sm:h-[238px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={ticketSalesData} margin={{ top: 8, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
-                <XAxis dataKey="event" tick={axisStyle} axisLine={false} tickLine={false} interval={0} height={44} />
-                <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={38} />
-                <Tooltip content={<TicketSalesTooltip />} />
-                <Bar dataKey="capacity" fill="#334155" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="sold" fill={chartPalette.green} radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          {ticketSalesData.length === 0 ? (
+            <WidgetEmptyState icon={TicketX} message="Ticket sales will appear after categories are added to an event." />
+          ) : (
+            <ChartBox height="h-[220px] sm:h-[238px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={ticketSalesData} margin={{ top: 8, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={gridStyle} strokeDasharray="4 4" vertical={false} />
+                  <XAxis dataKey="event" tick={axisStyle} axisLine={false} tickLine={false} interval={0} height={44} />
+                  <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={38} />
+                  <Tooltip content={<TicketSalesTooltip />} />
+                  <Bar dataKey="capacity" fill="#334155" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="sold" fill={chartPalette.green} radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartBox>
+          )}
         </Widget>
       </section>
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <ChartCard title="Revenue Trend" subtitle="Commercial momentum across planning months">
-          {isSupabaseMode ? (
-            <ChartEmptyState message="Revenue trend will appear when cloud analytics support is available." />
+        <ChartCard title="Revenue Trend" subtitle={isSupabaseMode ? "Recorded Finance income grouped by transaction month" : "Commercial momentum across planning months"}>
+          {isFinanceLoading && isSupabaseMode ? (
+            <ChartEmptyState icon={TrendingUp} message="Loading recorded income..." />
+          ) : financeError && isSupabaseMode ? (
+            <ChartEmptyState icon={TrendingUp} message="Finance activity could not be loaded. Try refreshing the workspace." />
+          ) : revenueTrendData.length === 0 ? (
+            <ChartEmptyState icon={TrendingUp} message={isSupabaseMode ? "Add an Income transaction in Finance to start the revenue trend." : "No revenue trend data available."} />
           ) : (
             <ChartBox height="h-[220px] sm:h-[248px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={revenueTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <AreaChart data={revenueTrendData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor={chartPalette.blue} stopOpacity={0.42} />
@@ -438,13 +514,17 @@ export default function Dashboard({ data, isSupabaseMode, setData }: DashboardPr
           )}
         </ChartCard>
 
-        <ChartCard title="Monthly Profit" subtitle="Profit trajectory after operating costs">
-          {isSupabaseMode ? (
-            <ChartEmptyState message="Monthly profit history is not available in cloud mode yet." />
+        <ChartCard title="Monthly Profit" subtitle={isSupabaseMode ? "Recorded Finance income minus expense by transaction month" : "Profit trajectory after operating costs"}>
+          {isFinanceLoading && isSupabaseMode ? (
+            <ChartEmptyState icon={WalletCards} message="Loading recorded transactions..." />
+          ) : financeError && isSupabaseMode ? (
+            <ChartEmptyState icon={WalletCards} message="Finance activity could not be loaded. Try refreshing the workspace." />
+          ) : monthlyProfitData.length === 0 ? (
+            <ChartEmptyState icon={WalletCards} message={isSupabaseMode ? "Add Finance income or expense transactions to calculate monthly profit." : "No monthly profit data available."} />
           ) : (
             <ChartBox height="h-[220px] sm:h-[248px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyProfit} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <AreaChart data={monthlyProfitData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="profitFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor={chartPalette.green} stopOpacity={0.45} />
@@ -481,12 +561,14 @@ function ChartBox({ height, children }: { height: string; children: ReactNode })
   return <div className={`${height} min-h-0 min-w-0 overflow-hidden`}>{children}</div>;
 }
 
-function ChartEmptyState({ message }: { message: string }) {
+function ChartEmptyState({ icon: Icon, message }: { icon: LucideIcon; message: string }) {
   return (
-    <div className="grid h-[220px] place-items-center rounded-lg border border-dashed border-white/10 bg-white/[0.025] px-5 text-center sm:h-[248px]">
+    <div className="grid h-[180px] place-items-center rounded-lg border border-dashed border-white/10 bg-white/[0.025] px-5 text-center sm:h-[200px]">
       <div>
-        <TrendingUp className="mx-auto text-slate-500" size={24} />
-        <p className="mt-3 text-sm text-app-muted">{message}</p>
+        <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg border border-white/10 bg-white/[0.04]">
+          <Icon className="text-slate-500" size={20} />
+        </div>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-app-muted">{message}</p>
       </div>
     </div>
   );
@@ -504,12 +586,25 @@ function Widget({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+function WidgetEmptyState({ icon: Icon, message }: { icon: LucideIcon; message: string }) {
+  return (
+    <div className="grid min-h-36 place-items-center rounded-lg border border-dashed border-white/10 bg-white/[0.025] px-4 py-5 text-center">
+      <div>
+        <div className="mx-auto grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04]">
+          <Icon className="text-slate-500" size={18} />
+        </div>
+        <p className="mx-auto mt-3 max-w-xs text-sm leading-6 text-app-muted">{message}</p>
+      </div>
+    </div>
+  );
+}
+
 function TicketSalesTooltip({
   active,
   payload,
 }: {
   active?: boolean;
-  payload?: Array<{ payload: { fullName: string; sold: number; capacity: number } }>;
+  payload?: Array<{ payload: { fullName: string; sold: number; capacity: number; revenue: number } }>;
 }) {
   if (!active || !payload?.length) return null;
   const point = payload[0].payload;
@@ -518,7 +613,8 @@ function TicketSalesTooltip({
     <div className="rounded-lg border border-white/10 bg-app-bg px-3 py-2 text-sm shadow-premium">
       <p className="font-medium text-white">{point.fullName}</p>
       <p className="mt-1 text-xs text-app-muted">Sold: {formatNumber(point.sold)}</p>
-      <p className="text-xs text-app-muted">Capacity: {formatNumber(point.capacity)}</p>
+      <p className="text-xs text-app-muted">Inventory: {formatNumber(point.capacity)}</p>
+      <p className="text-xs text-app-muted">Revenue: {formatCurrency(point.revenue)}</p>
     </div>
   );
 }
