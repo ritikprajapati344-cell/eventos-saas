@@ -2,10 +2,10 @@ import type { FinanceTransactionRecord } from "../lib/financeTransactionsReposit
 import type { EventOSData } from "../types";
 
 export interface DashboardForecastPoint {
-  actual: number;
-  forecast: number;
   month: string;
   period: string;
+  projectedRevenue: number;
+  recordedIncome: number;
 }
 
 export interface DashboardProfitPoint {
@@ -28,34 +28,36 @@ export interface DashboardTicketSalesPoint {
   sold: number;
 }
 
-export function buildCloudForecast(data: EventOSData): DashboardForecastPoint[] {
-  const eventRevenue = new Map<string, number>();
+export function buildCloudForecast(
+  data: EventOSData,
+  transactions: FinanceTransactionRecord[],
+): DashboardForecastPoint[] {
+  const monthly = new Map<string, { projectedRevenue: number; recordedIncome: number }>();
 
-  data.ticketCategories.forEach((ticket) => {
-    eventRevenue.set(ticket.eventId, (eventRevenue.get(ticket.eventId) ?? 0) + ticket.sold * ticket.price);
-  });
-
-  data.sponsors.forEach((sponsor) => {
-    if (sponsor.eventId && sponsor.status === "Closed Won") {
-      eventRevenue.set(sponsor.eventId, (eventRevenue.get(sponsor.eventId) ?? 0) + sponsor.sponsorshipAmount);
-    }
-  });
-
-  const monthly = new Map<string, { actual: number; forecast: number }>();
   data.events
     .filter((event) => event.status !== "Cancelled")
     .forEach((event) => {
       const period = getMonthPeriod(event.date);
       if (!period) return;
 
-      const current = monthly.get(period) ?? { actual: 0, forecast: 0 };
-      current.forecast += event.expectedRevenue;
-      current.actual += eventRevenue.get(event.id) ?? 0;
+      const current = monthly.get(period) ?? { projectedRevenue: 0, recordedIncome: 0 };
+      current.projectedRevenue += event.expectedRevenue;
+      monthly.set(period, current);
+    });
+
+  transactions
+    .filter((transaction) => transaction.type === "Income")
+    .forEach((transaction) => {
+      const period = getMonthPeriod(transaction.date);
+      if (!period) return;
+
+      const current = monthly.get(period) ?? { projectedRevenue: 0, recordedIncome: 0 };
+      current.recordedIncome += transaction.amount;
       monthly.set(period, current);
     });
 
   return [...monthly.entries()]
-    .filter(([, point]) => point.forecast !== 0 || point.actual !== 0)
+    .filter(([, point]) => point.projectedRevenue !== 0 || point.recordedIncome !== 0)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([period, point]) => ({ ...point, month: formatMonthPeriod(period), period }));
 }
@@ -73,7 +75,12 @@ export function buildCloudFinanceTrends(transactions: FinanceTransactionRecord[]
     monthly.set(period, current);
   });
 
-  const periods = [...monthly.keys()].sort();
+  const periods = [...monthly.keys()]
+    .filter((period) => {
+      const point = monthly.get(period)!;
+      return point.income !== 0 || point.expense !== 0;
+    })
+    .sort();
 
   return {
     monthlyProfit: periods.map((period) => ({

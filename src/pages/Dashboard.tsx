@@ -6,6 +6,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -188,7 +189,10 @@ export default function Dashboard({
     }));
   }, [data, isSupabaseMode]);
 
-  const cloudForecast = useMemo(() => buildCloudForecast(data), [data]);
+  const cloudForecast = useMemo(
+    () => buildCloudForecast(data, financeTransactions),
+    [data, financeTransactions],
+  );
   const cloudFinanceTrends = useMemo(
     () => buildCloudFinanceTrends(financeTransactions),
     [financeTransactions],
@@ -196,6 +200,10 @@ export default function Dashboard({
   const forecastData = isSupabaseMode ? cloudForecast : data.revenueForecast;
   const revenueTrendData = isSupabaseMode ? cloudFinanceTrends.revenueTrend : revenueTrend;
   const monthlyProfitData = isSupabaseMode ? cloudFinanceTrends.monthlyProfit : monthlyProfit;
+  const hasCloudProjectedRevenue = cloudForecast.some((point) => point.projectedRevenue > 0);
+  const hasCloudRecordedIncome = cloudForecast.some((point) => point.recordedIncome > 0);
+  const hasCloudTicketSales = ticketSalesData.some((point) => point.sold > 0);
+  const cloudTicketInventory = ticketSalesData.reduce((total, point) => total + point.capacity, 0);
 
   const pipelineData = sponsorStages.map((stage) => ({
     stage,
@@ -314,12 +322,16 @@ export default function Dashboard({
       <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
         <ChartCard
           title="Revenue Forecast"
-          subtitle={isSupabaseMode ? "Expected event revenue against linked ticket and sponsor revenue" : "Actual revenue against forecasted commercial plan"}
+          subtitle={isSupabaseMode ? "Projected event revenue compared with dated Finance income" : "Actual revenue against forecasted commercial plan"}
         >
-          {forecastData.length === 0 ? (
+          {isFinanceLoading && isSupabaseMode ? (
+            <ChartEmptyState icon={TrendingUp} message="Loading projected revenue and recorded income..." />
+          ) : financeError && isSupabaseMode ? (
+            <ChartEmptyState icon={TrendingUp} message="Recorded income could not be loaded. Try refreshing the workspace." />
+          ) : forecastData.length === 0 ? (
             <ChartEmptyState
               icon={TrendingUp}
-              message={isSupabaseMode ? "Add event expectations, ticket sales, or won sponsors to build the forecast." : "No forecast data available."}
+              message={isSupabaseMode ? "Add expected event revenue or a dated Finance income transaction to build this chart." : "No forecast data available."}
             />
           ) : (
             <ChartBox height="h-[220px] sm:h-[260px]">
@@ -329,8 +341,22 @@ export default function Dashboard({
                   <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
                   <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
-                  <Line type="monotone" dataKey="forecast" stroke={chartPalette.amber} strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="actual" stroke={chartPalette.green} strokeWidth={3} dot={{ r: 3 }} />
+                  {isSupabaseMode ? (
+                    <>
+                      <Legend />
+                      {hasCloudProjectedRevenue && (
+                        <Line name="Projected Revenue" type="monotone" dataKey="projectedRevenue" stroke={chartPalette.amber} strokeWidth={2.5} dot={{ r: 3 }} />
+                      )}
+                      {hasCloudRecordedIncome && (
+                        <Line name="Recorded Income" type="monotone" dataKey="recordedIncome" stroke={chartPalette.green} strokeWidth={3} dot={{ r: 3 }} />
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Line type="monotone" dataKey="forecast" stroke={chartPalette.amber} strokeWidth={2.5} dot={false} />
+                      <Line type="monotone" dataKey="actual" stroke={chartPalette.green} strokeWidth={3} dot={{ r: 3 }} />
+                    </>
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </ChartBox>
@@ -468,6 +494,11 @@ export default function Dashboard({
         <Widget title="Ticket Sales Summary">
           {ticketSalesData.length === 0 ? (
             <WidgetEmptyState icon={TicketX} message="Ticket sales will appear after categories are added to an event." />
+          ) : isSupabaseMode && !hasCloudTicketSales ? (
+            <WidgetEmptyState
+              icon={TicketX}
+              message={`${formatNumber(cloudTicketInventory)} tickets are configured. No ticket sales have been recorded yet.`}
+            />
           ) : (
             <ChartBox height="h-[220px] sm:h-[238px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -476,8 +507,9 @@ export default function Dashboard({
                   <XAxis dataKey="event" tick={axisStyle} axisLine={false} tickLine={false} interval={0} height={44} />
                   <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={38} />
                   <Tooltip content={<TicketSalesTooltip />} />
-                  <Bar dataKey="capacity" fill="#334155" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="sold" fill={chartPalette.green} radius={[6, 6, 0, 0]} />
+                  {isSupabaseMode && <Legend />}
+                  <Bar name={isSupabaseMode ? "Inventory" : undefined} dataKey="capacity" fill="#334155" radius={[6, 6, 0, 0]} />
+                  <Bar name={isSupabaseMode ? "Sold" : undefined} dataKey="sold" fill={chartPalette.green} radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartBox>
@@ -486,7 +518,7 @@ export default function Dashboard({
       </section>
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <ChartCard title="Revenue Trend" subtitle={isSupabaseMode ? "Recorded Finance income grouped by transaction month" : "Commercial momentum across planning months"}>
+        <ChartCard title="Revenue Trend" subtitle={isSupabaseMode ? "Dated Finance income grouped by transaction month" : "Commercial momentum across planning months"}>
           {isFinanceLoading && isSupabaseMode ? (
             <ChartEmptyState icon={TrendingUp} message="Loading recorded income..." />
           ) : financeError && isSupabaseMode ? (
@@ -514,7 +546,7 @@ export default function Dashboard({
           )}
         </ChartCard>
 
-        <ChartCard title="Monthly Profit" subtitle={isSupabaseMode ? "Recorded Finance income minus expense by transaction month" : "Profit trajectory after operating costs"}>
+        <ChartCard title={isSupabaseMode ? "Recorded Monthly Profit" : "Monthly Profit"} subtitle={isSupabaseMode ? "Dated Finance income minus Finance expense by transaction month" : "Profit trajectory after operating costs"}>
           {isFinanceLoading && isSupabaseMode ? (
             <ChartEmptyState icon={WalletCards} message="Loading recorded transactions..." />
           ) : financeError && isSupabaseMode ? (
