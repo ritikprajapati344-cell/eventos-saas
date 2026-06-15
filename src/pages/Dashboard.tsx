@@ -33,6 +33,8 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter, UNASSIGNED_EVENTS_FILTER } from "../components/EventFilter";
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
@@ -166,55 +168,71 @@ export default function Dashboard({
   setData,
 }: DashboardProps) {
   const [activeAction, setActiveAction] = useState<QuickAction | null>(null);
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
   const [forms, setForms] = useState(initialForms);
   const [error, setError] = useState("");
 
-  const totalRevenue = getTotalRevenue(data.events, data.sponsors, data.ticketCategories);
-  const totalExpenses = getTotalExpenses(data.expenses);
-  const netProfit = getNetProfit(data.events, data.sponsors, data.expenses, data.ticketCategories);
-  const ticketsSold = getTicketsSold(data.events, data.ticketCategories);
-  const ticketInventory = getTicketInventory(data.events, data.ticketCategories);
-  const availableTickets = getAvailableTickets(data.ticketCategories);
-  const sponsorsClosed = data.sponsors.filter((sponsor) => sponsor.status === "Closed Won").length;
-  const activeEvents = data.events.filter((event) => !event.archived && (event.status === "Planning" || event.status === "Upcoming" || event.status === "Ongoing")).length;
+  const localFinanceTransactions = useMemo(readStoredFinanceTransactions, []);
+  const activeFinanceTransactions = isSupabaseMode ? financeTransactions : localFinanceTransactions;
+  const scopedData = useMemo(() => filterDashboardData(data, eventFilter), [data, eventFilter]);
+  const scopedFinanceTransactions = useMemo(
+    () => activeFinanceTransactions.filter((transaction) => matchesEventFilter(transaction.eventId, eventFilter)),
+    [activeFinanceTransactions, eventFilter],
+  );
+  const scope = getDashboardScope(data, eventFilter);
+  const isAllEventsScope = eventFilter === ALL_EVENTS_FILTER;
+  const usesAttributedAnalytics = isSupabaseMode || !isAllEventsScope;
+
+  const totalRevenue = getTotalRevenue(scopedData.events, scopedData.sponsors, scopedData.ticketCategories);
+  const totalExpenses = getTotalExpenses(scopedData.expenses);
+  const netProfit = getNetProfit(scopedData.events, scopedData.sponsors, scopedData.expenses, scopedData.ticketCategories);
+  const ticketsSold = usesAttributedAnalytics
+    ? scopedData.ticketCategories.reduce((total, ticket) => total + ticket.sold, 0)
+    : getTicketsSold(scopedData.events, scopedData.ticketCategories);
+  const ticketInventory = usesAttributedAnalytics
+    ? scopedData.ticketCategories.reduce((total, ticket) => total + ticket.inventory, 0)
+    : getTicketInventory(scopedData.events, scopedData.ticketCategories);
+  const availableTickets = getAvailableTickets(scopedData.ticketCategories);
+  const sponsorsClosed = scopedData.sponsors.filter((sponsor) => sponsor.status === "Closed Won").length;
+  const activeEvents = scopedData.events.filter((event) => !event.archived && (event.status === "Planning" || event.status === "Upcoming" || event.status === "Ongoing")).length;
 
   const ticketSalesData = useMemo(() => {
-    if (isSupabaseMode) return buildCloudTicketSales(data);
-    return data.events.slice(0, 5).map((event) => ({
+    if (usesAttributedAnalytics) return buildCloudTicketSales(scopedData);
+    return scopedData.events.slice(0, 5).map((event) => ({
       event: makeChartLabel(event.name),
       fullName: event.name,
       sold: event.ticketsSold,
       capacity: event.capacity,
       revenue: event.ticketsSold * event.ticketPrice,
     }));
-  }, [data, isSupabaseMode]);
+  }, [scopedData, usesAttributedAnalytics]);
 
-  const cloudForecast = useMemo(
-    () => buildCloudForecast(data, financeTransactions),
-    [data, financeTransactions],
+  const scopedForecast = useMemo(
+    () => buildCloudForecast(scopedData, scopedFinanceTransactions),
+    [scopedData, scopedFinanceTransactions],
   );
-  const cloudFinanceTrends = useMemo(
-    () => buildCloudFinanceTrends(financeTransactions),
-    [financeTransactions],
+  const scopedFinanceTrends = useMemo(
+    () => buildCloudFinanceTrends(scopedFinanceTransactions),
+    [scopedFinanceTransactions],
   );
-  const forecastData = isSupabaseMode ? cloudForecast : data.revenueForecast;
-  const revenueTrendData = isSupabaseMode ? cloudFinanceTrends.revenueTrend : revenueTrend;
-  const monthlyProfitData = isSupabaseMode ? cloudFinanceTrends.monthlyProfit : monthlyProfit;
-  const hasCloudProjectedRevenue = cloudForecast.some((point) => point.projectedRevenue > 0);
-  const hasCloudRecordedIncome = cloudForecast.some((point) => point.recordedIncome > 0);
+  const forecastData = usesAttributedAnalytics ? scopedForecast : data.revenueForecast;
+  const revenueTrendData = usesAttributedAnalytics ? scopedFinanceTrends.revenueTrend : revenueTrend;
+  const monthlyProfitData = usesAttributedAnalytics ? scopedFinanceTrends.monthlyProfit : monthlyProfit;
+  const hasCloudProjectedRevenue = scopedForecast.some((point) => point.projectedRevenue > 0);
+  const hasCloudRecordedIncome = scopedForecast.some((point) => point.recordedIncome > 0);
   const hasCloudTicketSales = ticketSalesData.some((point) => point.sold > 0);
   const cloudTicketInventory = ticketSalesData.reduce((total, point) => total + point.capacity, 0);
 
   const pipelineData = sponsorStages.map((stage) => ({
     stage,
-    count: data.sponsors.filter((sponsor) => sponsor.status === stage).length,
-    value: data.sponsors
+    count: scopedData.sponsors.filter((sponsor) => sponsor.status === stage).length,
+    value: scopedData.sponsors
       .filter((sponsor) => sponsor.status === stage)
       .reduce((total, sponsor) => total + sponsor.sponsorshipAmount, 0),
   }));
   const pipelineMaxCount = Math.max(...pipelineData.map((item) => item.count), 0);
 
-  const calendar = useMemo(() => buildCalendar(data), [data]);
+  const calendar = useMemo(() => buildCalendar(scopedData), [scopedData]);
 
   const openAction = (action: QuickAction) => {
     if (isSupabaseMode) return;
@@ -256,21 +274,21 @@ export default function Dashboard({
 
   const activities = useMemo(
     () =>
-      [...data.activities]
+      [...scopedData.activities]
         .sort((a, b) => Number(b.time === "Just now") - Number(a.time === "Just now"))
         .slice(0, 5),
-    [data.activities],
+    [scopedData.activities],
   );
   const visibleTasks = useMemo(
     () => (
       isSupabaseMode
-        ? [...data.tasks]
+        ? [...scopedData.tasks]
             .filter((task) => task.status !== "Done")
             .sort((left, right) => left.dueDate.localeCompare(right.dueDate))
             .slice(0, 4)
-        : data.tasks.slice(0, 4)
+        : scopedData.tasks.slice(0, 4)
     ),
-    [data.tasks, isSupabaseMode],
+    [isSupabaseMode, scopedData.tasks],
   );
 
   return (
@@ -285,13 +303,15 @@ export default function Dashboard({
         }
       />
 
+      <EventFilter events={data.events} onChange={setEventFilter} value={eventFilter} />
+
       <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <KpiCard title="Active Events" value={formatNumber(activeEvents)} helper={`${data.events.filter((event) => !event.archived).length} visible events`} icon={CalendarDays} />
+        <KpiCard title="Active Events" value={formatNumber(activeEvents)} helper={`${scopedData.events.filter((event) => !event.archived).length} visible in ${scope.shortLabel}`} icon={CalendarDays} />
         <KpiCard title="Total Revenue" value={formatCurrency(totalRevenue)} helper="Ticket + sponsor revenue" icon={BadgeIndianRupee} tone="success" />
         <KpiCard title="Total Expenses" value={formatCurrency(totalExpenses)} helper="Approved operating spend" icon={WalletCards} tone="warning" />
         <KpiCard title="Net Profit" value={formatCurrency(netProfit)} helper="Revenue minus expenses" icon={TrendingUp} tone="success" />
         <KpiCard title="Tickets Sold" value={`${formatNumber(ticketsSold)}/${formatNumber(ticketInventory)}`} helper={`${formatNumber(availableTickets)} available`} icon={CircleDollarSign} />
-        <KpiCard title="Sponsors Won" value={formatNumber(sponsorsClosed)} helper={formatCurrency(getSponsorRevenue(data.sponsors))} icon={BriefcaseBusiness} tone="danger" />
+        <KpiCard title="Sponsors Won" value={formatNumber(sponsorsClosed)} helper={formatCurrency(getSponsorRevenue(scopedData.sponsors))} icon={BriefcaseBusiness} tone="danger" />
       </section>
 
       <section className="glass-panel min-w-0 rounded-lg p-3">
@@ -322,16 +342,16 @@ export default function Dashboard({
       <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
         <ChartCard
           title="Revenue Forecast"
-          subtitle={isSupabaseMode ? "Projected event revenue compared with dated Finance income" : "Actual revenue against forecasted commercial plan"}
+          subtitle={usesAttributedAnalytics ? "Projected event revenue compared with dated Finance income" : "Actual revenue against forecasted commercial plan"}
         >
           {isFinanceLoading && isSupabaseMode ? (
-            <ChartEmptyState icon={TrendingUp} message="Loading projected revenue and recorded income..." />
+            <ChartEmptyState icon={TrendingUp} message={`Loading projected revenue and recorded income for ${scope.shortLabel}...`} />
           ) : financeError && isSupabaseMode ? (
             <ChartEmptyState icon={TrendingUp} message="Recorded income could not be loaded. Try refreshing the workspace." />
           ) : forecastData.length === 0 ? (
             <ChartEmptyState
               icon={TrendingUp}
-              message={isSupabaseMode ? "Add expected event revenue or a dated Finance income transaction to build this chart." : "No forecast data available."}
+              message={`No projected revenue or recorded income for ${scope.shortLabel}.`}
             />
           ) : (
             <ChartBox height="h-[220px] sm:h-[260px]">
@@ -341,7 +361,7 @@ export default function Dashboard({
                   <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
                   <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `${Number(value) / 100000}L`} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
-                  {isSupabaseMode ? (
+                  {usesAttributedAnalytics ? (
                     <>
                       <Legend />
                       {hasCloudProjectedRevenue && (
@@ -366,28 +386,32 @@ export default function Dashboard({
         <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-1">
           <Widget title="Recent Activities">
             {activities.length === 0 ? (
-              <WidgetEmptyState icon={Activity} message="Workspace activity will appear here after your first update." />
+              <WidgetEmptyState icon={Activity} message={`No recent activities for ${scope.shortLabel}.`} />
             ) : (
               <div className="space-y-2">
-                {activities.map((activity) => (
-                  <div key={activity.id} className="flex min-w-0 gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3">
-                    <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-app-primary" />
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <p className="break-words text-sm font-medium leading-5 text-white">{activity.message}</p>
-                        {activity.time === "Just now" && <StatusBadge label="New" tone="green" />}
+                {activities.map((activity) => {
+                  const linkedEvent = data.events.find((event) => event.id === activity.eventId);
+                  return (
+                    <div key={activity.id} className="flex min-w-0 gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                      <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-app-primary" />
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="break-words text-sm font-medium leading-5 text-white">{activity.message}</p>
+                          {activity.time === "Just now" && <StatusBadge label="New" tone="green" />}
+                        </div>
+                        <p className="mt-1 text-xs text-app-muted">{activity.entity} - {activity.time}</p>
+                        <EventContextChip className="mt-2" event={linkedEvent} />
                       </div>
-                      <p className="mt-1 text-xs text-app-muted">{activity.entity} - {activity.time}</p>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Widget>
 
           <Widget title="Upcoming Tasks">
             {visibleTasks.length === 0 ? (
-              <WidgetEmptyState icon={ClipboardList} message="No upcoming tasks. Add tasks from an event workspace." />
+              <WidgetEmptyState icon={ClipboardList} message={`No upcoming tasks for ${scope.shortLabel}.`} />
             ) : (
               <div className="space-y-2">
                 {visibleTasks.map((task) => {
@@ -397,7 +421,7 @@ export default function Dashboard({
                     <div className="flex flex-col items-start justify-between gap-2 min-[430px]:flex-row min-[430px]:gap-3">
                       <div className="min-w-0">
                         <p className="line-clamp-2 text-sm font-medium leading-5 text-white">{task.title}</p>
-                        <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-[0.12em] text-app-muted">{linkedEvent?.name ?? "Event task"}</p>
+                        <EventContextChip className="mt-2" event={linkedEvent} />
                       </div>
                       <div className="flex shrink-0 flex-row flex-wrap gap-1 min-[430px]:flex-col min-[430px]:items-end">
                         <StatusBadge label={task.priority} tone={priorityTone[task.priority]} />
@@ -456,14 +480,14 @@ export default function Dashboard({
               </div>
             ))}
             {calendar.monthEvents.length === 0 && (
-              <p className="rounded-lg bg-white/[0.035] px-3 py-2 text-sm text-app-muted">No events scheduled this month.</p>
+              <p className="rounded-lg bg-white/[0.035] px-3 py-2 text-sm text-app-muted">No events scheduled for {scope.shortLabel} this month.</p>
             )}
           </div>
         </Widget>
 
         <Widget title="Sponsor Pipeline Summary">
-          {isSupabaseMode && data.sponsors.length === 0 ? (
-            <WidgetEmptyState icon={BriefcaseBusiness} message="No sponsor opportunities yet. Add sponsors from the CRM pipeline." />
+          {scopedData.sponsors.length === 0 && (isSupabaseMode || !isAllEventsScope) ? (
+            <WidgetEmptyState icon={BriefcaseBusiness} message={`No sponsor opportunities for ${scope.shortLabel}.`} />
           ) : (
             <>
               <div className="space-y-2">
@@ -478,6 +502,7 @@ export default function Dashboard({
                         className="h-full rounded-full bg-app-primary transition-[width]"
                         style={{
                           width: isSupabaseMode
+                            || !isAllEventsScope
                             ? `${pipelineMaxCount > 0 ? (item.count / pipelineMaxCount) * 100 : 0}%`
                             : `${Math.max(18, 100 - index * 12)}%`,
                         }}
@@ -486,18 +511,18 @@ export default function Dashboard({
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-app-muted">Open pipeline value: {formatCurrency(getPipelineValue(data.sponsors))}</p>
+              <p className="mt-3 text-xs text-app-muted">Open pipeline value: {formatCurrency(getPipelineValue(scopedData.sponsors))}</p>
             </>
           )}
         </Widget>
 
         <Widget title="Ticket Sales Summary">
           {ticketSalesData.length === 0 ? (
-            <WidgetEmptyState icon={TicketX} message="Ticket sales will appear after categories are added to an event." />
-          ) : isSupabaseMode && !hasCloudTicketSales ? (
+            <WidgetEmptyState icon={TicketX} message={`No ticket sales data for ${scope.shortLabel}.`} />
+          ) : (isSupabaseMode || !isAllEventsScope) && !hasCloudTicketSales ? (
             <WidgetEmptyState
               icon={TicketX}
-              message={`${formatNumber(cloudTicketInventory)} tickets are configured. No ticket sales have been recorded yet.`}
+              message={`${formatNumber(cloudTicketInventory)} tickets are configured for ${scope.shortLabel}. No ticket sales have been recorded yet.`}
             />
           ) : (
             <ChartBox height="h-[220px] sm:h-[238px]">
@@ -507,9 +532,9 @@ export default function Dashboard({
                   <XAxis dataKey="event" tick={axisStyle} axisLine={false} tickLine={false} interval={0} height={44} />
                   <YAxis tick={axisStyle} axisLine={false} tickLine={false} width={38} />
                   <Tooltip content={<TicketSalesTooltip />} />
-                  {isSupabaseMode && <Legend />}
-                  <Bar name={isSupabaseMode ? "Inventory" : undefined} dataKey="capacity" fill="#334155" radius={[6, 6, 0, 0]} />
-                  <Bar name={isSupabaseMode ? "Sold" : undefined} dataKey="sold" fill={chartPalette.green} radius={[6, 6, 0, 0]} />
+                  {usesAttributedAnalytics && <Legend />}
+                  <Bar name={usesAttributedAnalytics ? "Inventory" : undefined} dataKey="capacity" fill="#334155" radius={[6, 6, 0, 0]} />
+                  <Bar name={usesAttributedAnalytics ? "Sold" : undefined} dataKey="sold" fill={chartPalette.green} radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartBox>
@@ -518,13 +543,13 @@ export default function Dashboard({
       </section>
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <ChartCard title="Revenue Trend" subtitle={isSupabaseMode ? "Dated Finance income grouped by transaction month" : "Commercial momentum across planning months"}>
+        <ChartCard title="Revenue Trend" subtitle={usesAttributedAnalytics ? "Dated Finance income grouped by transaction month" : "Commercial momentum across planning months"}>
           {isFinanceLoading && isSupabaseMode ? (
-            <ChartEmptyState icon={TrendingUp} message="Loading recorded income..." />
+            <ChartEmptyState icon={TrendingUp} message={`Loading recorded income for ${scope.shortLabel}...`} />
           ) : financeError && isSupabaseMode ? (
             <ChartEmptyState icon={TrendingUp} message="Finance activity could not be loaded. Try refreshing the workspace." />
           ) : revenueTrendData.length === 0 ? (
-            <ChartEmptyState icon={TrendingUp} message={isSupabaseMode ? "Add an Income transaction in Finance to start the revenue trend." : "No revenue trend data available."} />
+            <ChartEmptyState icon={TrendingUp} message={`No recorded Finance income for ${scope.shortLabel}.`} />
           ) : (
             <ChartBox height="h-[220px] sm:h-[248px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -546,13 +571,13 @@ export default function Dashboard({
           )}
         </ChartCard>
 
-        <ChartCard title={isSupabaseMode ? "Recorded Monthly Profit" : "Monthly Profit"} subtitle={isSupabaseMode ? "Dated Finance income minus Finance expense by transaction month" : "Profit trajectory after operating costs"}>
+        <ChartCard title={usesAttributedAnalytics ? "Recorded Monthly Profit" : "Monthly Profit"} subtitle={usesAttributedAnalytics ? "Dated Finance income minus Finance expense by transaction month" : "Profit trajectory after operating costs"}>
           {isFinanceLoading && isSupabaseMode ? (
-            <ChartEmptyState icon={WalletCards} message="Loading recorded transactions..." />
+            <ChartEmptyState icon={WalletCards} message={`Loading recorded transactions for ${scope.shortLabel}...`} />
           ) : financeError && isSupabaseMode ? (
             <ChartEmptyState icon={WalletCards} message="Finance activity could not be loaded. Try refreshing the workspace." />
           ) : monthlyProfitData.length === 0 ? (
-            <ChartEmptyState icon={WalletCards} message={isSupabaseMode ? "Add Finance income or expense transactions to calculate monthly profit." : "No monthly profit data available."} />
+            <ChartEmptyState icon={WalletCards} message={`No recorded Finance income or expense transactions for ${scope.shortLabel}.`} />
           ) : (
             <ChartBox height="h-[220px] sm:h-[248px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -948,8 +973,43 @@ function makeChartLabel(name: string) {
     .join(" ");
 }
 
+function filterDashboardData(data: EventOSData, filter: string): EventOSData {
+  if (filter === ALL_EVENTS_FILTER) return data;
+
+  return {
+    ...data,
+    activities: data.activities.filter((activity) => matchesEventFilter(activity.eventId, filter)),
+    events: data.events.filter((event) => filter !== UNASSIGNED_EVENTS_FILTER && event.id === filter),
+    expenses: data.expenses.filter((expense) => matchesEventFilter(expense.eventId, filter)),
+    sponsors: data.sponsors.filter((sponsor) => matchesEventFilter(sponsor.eventId, filter)),
+    tasks: data.tasks.filter((task) => matchesEventFilter(task.eventId, filter)),
+    ticketCategories: data.ticketCategories.filter((ticket) => matchesEventFilter(ticket.eventId, filter)),
+  };
+}
+
+function getDashboardScope(data: EventOSData, filter: string) {
+  if (filter === ALL_EVENTS_FILTER) {
+    return { shortLabel: "all events" };
+  }
+  if (filter === UNASSIGNED_EVENTS_FILTER) {
+    return { shortLabel: "workspace-wide records" };
+  }
+
+  const eventName = data.events.find((event) => event.id === filter)?.name ?? "selected event";
+  return { shortLabel: eventName };
+}
+
+function readStoredFinanceTransactions() {
+  try {
+    const saved = localStorage.getItem("eventos-finance-transactions-v1");
+    return saved ? JSON.parse(saved) as FinanceTransactionRecord[] : [];
+  } catch {
+    return [];
+  }
+}
+
 function buildCalendar(data: EventOSData) {
-  const anchor = data.events[0]?.date ? new Date(data.events[0].date) : new Date(2026, 5, 1);
+  const anchor = data.events[0]?.date ? new Date(data.events[0].date) : new Date();
   const year = anchor.getFullYear();
   const month = anchor.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();

@@ -101,24 +101,27 @@ export function buildCloudFinanceTrends(transactions: FinanceTransactionRecord[]
 export function buildCloudTicketSales(data: EventOSData, limit = 5): DashboardTicketSalesPoint[] {
   const eventMap = new Map(data.events.map((event) => [event.id, event]));
   const totals = new Map<string, { capacity: number; revenue: number; sold: number }>();
+  const workspaceKey = "__workspace__";
 
   data.ticketCategories.forEach((ticket) => {
-    if (!eventMap.has(ticket.eventId)) return;
+    const eventId = ticket.eventId || workspaceKey;
+    if (eventId !== workspaceKey && !eventMap.has(eventId)) return;
 
-    const current = totals.get(ticket.eventId) ?? { capacity: 0, revenue: 0, sold: 0 };
+    const current = totals.get(eventId) ?? { capacity: 0, revenue: 0, sold: 0 };
     current.capacity += ticket.inventory;
     current.sold += ticket.sold;
     current.revenue += ticket.sold * ticket.price;
-    totals.set(ticket.eventId, current);
+    totals.set(eventId, current);
   });
 
   return [...totals.entries()]
     .map(([eventId, total]) => {
-      const event = eventMap.get(eventId)!;
+      const event = eventMap.get(eventId);
+      const eventName = event?.name ?? "Workspace-wide";
       return {
         ...total,
-        event: makeChartLabel(event.name),
-        fullName: event.name,
+        event: makeChartLabel(eventName),
+        fullName: eventName,
       };
     })
     .sort((left, right) => right.sold - left.sold || right.revenue - left.revenue)
