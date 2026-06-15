@@ -1,15 +1,18 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, Clock, Edit3, Hammer, Plus, Trash2, WalletCards, X } from "lucide-react";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter } from "../components/EventFilter";
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { VendorsDataSource } from "../hooks/useVendorsData";
 import type { VendorWriteInput } from "../lib/vendorsRepository";
-import type { Vendor, VendorCategory } from "../types";
+import type { EventOSData, Vendor, VendorCategory } from "../types";
 import { formatCurrency } from "../utils/finance";
 
 interface VendorsProps {
+  events: EventOSData["events"];
   vendors: Vendor[];
   vendorsData: VendorsDataSource;
 }
@@ -22,6 +25,7 @@ type VendorForm = {
   category: VendorCategory | "Custom" | "";
   customCategory: string;
   dueDate: string;
+  eventId: string;
   name: string;
   owner: string;
   status: VendorPaymentStatus;
@@ -38,6 +42,7 @@ const initialForm: VendorForm = {
   category: "Sound",
   customCategory: "",
   dueDate: "",
+  eventId: "",
   name: "",
   owner: "Ops",
   status: "Pending",
@@ -49,10 +54,11 @@ const statusTone: Record<VendorPaymentStatus, "green" | "amber" | "red"> = {
   Pending: "red",
 };
 
-export default function Vendors({ vendors, vendorsData }: VendorsProps) {
+export default function Vendors({ events, vendors, vendorsData }: VendorsProps) {
   const [actionError, setActionError] = useState("");
   const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
   const [errors, setErrors] = useState<VendorFormErrors>({});
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
   const [form, setForm] = useState<VendorForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -78,8 +84,15 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
   }, []);
 
   const activeVendors = vendorsData.isSupabaseMode ? vendorsData.vendors : vendorList;
-  const filteredVendors = useMemo(() => activeVendors.filter((vendor) => vendorMatchesSearch(vendor, globalQuery)), [activeVendors, globalQuery]);
-  const totals = useMemo(() => getVendorTotals(activeVendors), [activeVendors]);
+  const eventScopedVendors = useMemo(
+    () => activeVendors.filter((vendor) => matchesEventFilter(vendor.eventId, eventFilter)),
+    [activeVendors, eventFilter],
+  );
+  const filteredVendors = useMemo(
+    () => eventScopedVendors.filter((vendor) => vendorMatchesSearch(vendor, globalQuery, events)),
+    [eventScopedVendors, events, globalQuery],
+  );
+  const totals = useMemo(() => getVendorTotals(eventScopedVendors), [eventScopedVendors]);
   const pendingVendors = filteredVendors.filter((vendor) => getPaymentStatus(vendor) !== "Paid");
   const paidVendors = filteredVendors.filter((vendor) => getPaymentStatus(vendor) === "Paid");
   const visibleActionError = actionError || vendorsData.error;
@@ -106,6 +119,7 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
       category: isCustomCategory ? "Custom" : vendor.category,
       customCategory: isCustomCategory ? vendor.category : "",
       dueDate: vendor.dueDate,
+      eventId: vendor.eventId ?? "",
       name: vendor.name,
       owner: vendor.owner,
       status: getPaymentStatus(vendor),
@@ -143,10 +157,7 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
       setIsSaving(true);
       setActionError("");
       try {
-        const existingVendor = editingVendorId
-          ? activeVendors.find((vendor) => vendor.id === editingVendorId)
-          : undefined;
-        const writeInput = vendorToWriteInput(vendorPayload, form.status, existingVendor);
+        const writeInput = vendorToWriteInput(vendorPayload, form.status);
 
         if (editingVendorId) {
           await vendorsData.updateVendor(editingVendorId, writeInput);
@@ -213,6 +224,8 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
         <KpiCard title="Payment Health" value={`${totals.health}%`} helper="Vendor cashflow complete" icon={WalletCards} tone="primary" />
       </section>
 
+      <EventFilter events={events} onChange={setEventFilter} value={eventFilter} />
+
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
           {visibleActionError}
@@ -258,7 +271,10 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
                     const dueState = getDueDateState(vendor.dueDate);
                     return (
                       <tr key={vendor.id} className="bg-white/[0.04]">
-                        <td className="rounded-l-lg px-4 py-4 font-medium text-white">{vendor.name}</td>
+                        <td className="rounded-l-lg px-4 py-4 font-medium text-white">
+                          <p className="break-words">{vendor.name}</p>
+                          <EventContextChip className="mt-2" event={events.find((event) => event.id === vendor.eventId)} />
+                        </td>
                         <td className="px-4 py-4 text-slate-300">{vendor.category}</td>
                         <td className="px-4 py-4 text-slate-300">{vendor.owner}</td>
                         <td className="px-4 py-4 text-right font-semibold text-white">{formatCurrency(vendor.amount)}</td>
@@ -284,8 +300,8 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-          <PaymentList title="Pending Payments" vendors={pendingVendors} />
-          <PaymentList title="Completed Payments" vendors={paidVendors} />
+          <PaymentList events={events} title="Pending Payments" vendors={pendingVendors} />
+          <PaymentList events={events} title="Completed Payments" vendors={paidVendors} />
         </div>
         </section>
       )}
@@ -294,6 +310,7 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
         <VendorModal
           editing={Boolean(editingVendorId)}
           errors={errors}
+          events={events}
           form={form}
           isSaving={isSaving}
           onCancel={closeModal}
@@ -306,7 +323,7 @@ export default function Vendors({ vendors, vendorsData }: VendorsProps) {
   );
 }
 
-function PaymentList({ title, vendors }: { title: string; vendors: Vendor[] }) {
+function PaymentList({ events, title, vendors }: { events: EventOSData["events"]; title: string; vendors: Vendor[] }) {
   return (
     <section className="glass-panel rounded-lg p-4">
       <h2 className="mb-3 text-base font-semibold text-white">{title}</h2>
@@ -321,6 +338,7 @@ function PaymentList({ title, vendors }: { title: string; vendors: Vendor[] }) {
                 <div className="min-w-0">
                   <p className="break-words text-sm font-medium text-white">{vendor.name}</p>
                   <p className="mt-1 break-words text-xs text-app-muted">{vendor.category} - {vendor.owner}</p>
+                  <EventContextChip className="mt-2" event={events.find((event) => event.id === vendor.eventId)} />
                 </div>
                 <StatusBadge label={paymentStatus} tone={statusTone[paymentStatus]} />
               </div>
@@ -340,6 +358,7 @@ function PaymentList({ title, vendors }: { title: string; vendors: Vendor[] }) {
 function VendorModal({
   editing,
   errors,
+  events,
   form,
   isSaving,
   onCancel,
@@ -349,6 +368,7 @@ function VendorModal({
 }: {
   editing: boolean;
   errors: VendorFormErrors;
+  events: EventOSData["events"];
   form: VendorForm;
   isSaving: boolean;
   onCancel: () => void;
@@ -375,6 +395,12 @@ function VendorModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Event">
+            <select className="dashboard-input" onChange={(event) => onChange("eventId", event.target.value)} value={form.eventId}>
+              <option value="">Workspace-wide / Unassigned</option>
+              {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            </select>
+          </Field>
           <Field error={errors.name} label="Vendor Name"><input className="dashboard-input" onChange={(event) => onChange("name", event.target.value)} value={form.name} /></Field>
           <Field error={errors.category} label="Category">
             <select className="dashboard-input" onChange={(event) => onChange("category", event.target.value)} value={form.category}>
@@ -492,12 +518,14 @@ function getVendorTotals(vendors: Vendor[]) {
   return { advancePaid, amount, health, remaining };
 }
 
-function vendorMatchesSearch(vendor: Vendor, query: string) {
+function vendorMatchesSearch(vendor: Vendor, query: string, events: EventOSData["events"]) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
 
   const remaining = getRemainingAmount(vendor);
+  const eventName = events.find((event) => event.id === vendor.eventId)?.name ?? "Workspace-wide";
   return [
+    eventName,
     vendor.name,
     vendor.category,
     vendor.owner,
@@ -540,6 +568,7 @@ function makeVendorPayload(form: VendorForm): Omit<Vendor, "id"> {
     amount,
     category: category as VendorCategory,
     dueDate: form.dueDate,
+    eventId: form.eventId || undefined,
     name: form.name.trim(),
     owner: form.owner.trim() || "Ops",
     status: normalizedStatus,
@@ -549,14 +578,13 @@ function makeVendorPayload(form: VendorForm): Omit<Vendor, "id"> {
 function vendorToWriteInput(
   vendor: Omit<Vendor, "id">,
   formStatus: VendorPaymentStatus,
-  existingVendor?: Vendor,
 ): VendorWriteInput {
   return {
     advancePaid: vendor.advancePaid ?? 0,
     amount: vendor.amount,
     category: vendor.category,
     dueDate: vendor.dueDate,
-    eventId: existingVendor?.eventId,
+    eventId: vendor.eventId,
     name: vendor.name,
     owner: vendor.owner,
     status: formStatus,

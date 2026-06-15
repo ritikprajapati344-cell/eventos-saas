@@ -1,6 +1,8 @@
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { BriefcaseBusiness, CalendarClock, Edit3, Handshake, Mail, Phone, Plus, TrendingUp, Trash2, UserRound, X } from "lucide-react";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter } from "../components/EventFilter";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
@@ -12,6 +14,7 @@ import { formatCurrency, getPipelineValue, getSponsorRevenue } from "../utils/fi
 
 interface SponsorsProps {
   activitiesData: ActivitiesDataSource;
+  events: EventOSData["events"];
   sponsors: Sponsor[];
   sponsorsData: SponsorsDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
@@ -22,6 +25,7 @@ type SponsorForm = {
   companyName: string;
   contactPerson: string;
   email: string;
+  eventId: string;
   nextFollowUp: string;
   notes: string;
   paymentReceived: "No" | "Yes";
@@ -39,6 +43,7 @@ const initialForm: SponsorForm = {
   companyName: "",
   contactPerson: "",
   email: "",
+  eventId: "",
   nextFollowUp: "",
   notes: "",
   paymentReceived: "No",
@@ -56,11 +61,12 @@ const stageTone: Record<SponsorStatus, "blue" | "green" | "amber" | "red" | "sla
   "Closed Lost": "red",
 };
 
-export default function Sponsors({ activitiesData, sponsors, sponsorsData, setData }: SponsorsProps) {
+export default function Sponsors({ activitiesData, events, sponsors, sponsorsData, setData }: SponsorsProps) {
   const [actionError, setActionError] = useState("");
   const [activityWarning, setActivityWarning] = useState("");
   const [editingSponsorId, setEditingSponsorId] = useState<string | null>(null);
   const [errors, setErrors] = useState<SponsorFormErrors>({});
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
   const [form, setForm] = useState<SponsorForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,10 +92,17 @@ export default function Sponsors({ activitiesData, sponsors, sponsorsData, setDa
   }, []);
 
   const cleanSponsors = useMemo(() => dedupeSponsors(sponsors).filter((sponsor) => !isStaleSponsor(sponsor)), [sponsors]);
-  const filteredSponsors = useMemo(() => cleanSponsors.filter((sponsor) => sponsorMatchesSearch(sponsor, globalQuery)), [cleanSponsors, globalQuery]);
-  const closedRevenue = getSponsorRevenue(cleanSponsors);
-  const openPipeline = getPipelineValue(cleanSponsors);
-  const activeDeals = cleanSponsors.filter((sponsor) => !["Closed Won", "Closed Lost"].includes(sponsor.status)).length;
+  const eventScopedSponsors = useMemo(
+    () => cleanSponsors.filter((sponsor) => matchesEventFilter(sponsor.eventId, eventFilter)),
+    [cleanSponsors, eventFilter],
+  );
+  const filteredSponsors = useMemo(
+    () => eventScopedSponsors.filter((sponsor) => sponsorMatchesSearch(sponsor, globalQuery, events)),
+    [eventScopedSponsors, events, globalQuery],
+  );
+  const closedRevenue = getSponsorRevenue(eventScopedSponsors);
+  const openPipeline = getPipelineValue(eventScopedSponsors);
+  const activeDeals = eventScopedSponsors.filter((sponsor) => !["Closed Won", "Closed Lost"].includes(sponsor.status)).length;
   const visibleActionError = actionError || sponsorsData.error;
 
   const recordActivity = async (input: ActivityWriteInput) => {
@@ -119,6 +132,7 @@ export default function Sponsors({ activitiesData, sponsors, sponsorsData, setDa
       companyName: sponsor.companyName,
       contactPerson: sponsor.contactPerson,
       email: sponsor.email ?? "",
+      eventId: sponsor.eventId ?? "",
       nextFollowUp: sponsor.nextFollowUp ?? "",
       notes: sponsor.notes,
       paymentReceived: sponsor.paymentReceived ? "Yes" : "No",
@@ -156,10 +170,7 @@ export default function Sponsors({ activitiesData, sponsors, sponsorsData, setDa
     if (sponsorsData.isSupabaseMode) {
       setIsSaving(true);
       try {
-        const existingSponsor = editingSponsorId
-          ? sponsors.find((sponsor) => sponsor.id === editingSponsorId)
-          : undefined;
-        const writeInput = sponsorToWriteInput(sponsorPayload, existingSponsor?.eventId);
+        const writeInput = sponsorToWriteInput(sponsorPayload);
 
         const savedSponsor = editingSponsorId
           ? await sponsorsData.updateSponsor(editingSponsorId, writeInput)
@@ -301,6 +312,8 @@ export default function Sponsors({ activitiesData, sponsors, sponsorsData, setDa
         <Summary icon={BriefcaseBusiness} label="Active Deals" value={activeDeals.toString()} />
       </section>
 
+      <EventFilter events={events} onChange={setEventFilter} value={eventFilter} />
+
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
           {visibleActionError}
@@ -353,6 +366,7 @@ export default function Sponsors({ activitiesData, sponsors, sponsorsData, setDa
                       onDelete={() => void deleteSponsor(sponsor)}
                       onEdit={() => openEditModal(sponsor)}
                       onStageChange={(status) => void changeStage(sponsor, status)}
+                      event={events.find((event) => event.id === sponsor.eventId)}
                       sponsor={sponsor}
                     />
                   ))}
@@ -367,6 +381,7 @@ export default function Sponsors({ activitiesData, sponsors, sponsorsData, setDa
         <SponsorModal
           editing={Boolean(editingSponsorId)}
           errors={errors}
+          events={events}
           form={form}
           isSaving={isSaving}
           onCancel={closeModal}
@@ -380,12 +395,14 @@ export default function Sponsors({ activitiesData, sponsors, sponsorsData, setDa
 
 function SponsorCard({
   disabled,
+  event,
   onDelete,
   onEdit,
   onStageChange,
   sponsor,
 }: {
   disabled: boolean;
+  event?: EventOSData["events"][number];
   onDelete: () => void;
   onEdit: () => void;
   onStageChange: (status: SponsorStatus) => void;
@@ -405,6 +422,8 @@ function SponsorCard({
         </div>
         <div className="shrink-0"><StatusBadge label={sponsor.status} tone={stageTone[sponsor.status]} /></div>
       </div>
+
+      <EventContextChip className="mt-3 self-start" event={event} />
 
       <div className="mt-3 space-y-1.5 text-xs text-slate-300">
         <p className="flex min-w-0 items-start gap-2 break-words">
@@ -448,6 +467,7 @@ function SponsorCard({
 function SponsorModal({
   editing,
   errors,
+  events,
   form,
   isSaving,
   onCancel,
@@ -456,6 +476,7 @@ function SponsorModal({
 }: {
   editing: boolean;
   errors: SponsorFormErrors;
+  events: EventOSData["events"];
   form: SponsorForm;
   isSaving: boolean;
   onCancel: () => void;
@@ -476,6 +497,12 @@ function SponsorModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Event">
+            <select className="dashboard-input" onChange={(event) => onChange("eventId", event.target.value)} value={form.eventId}>
+              <option value="">Workspace-wide / Unassigned</option>
+              {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            </select>
+          </Field>
           <Field error={errors.companyName} label="Company Name"><input className="dashboard-input" onChange={(event) => onChange("companyName", event.target.value)} value={form.companyName} /></Field>
           <Field error={errors.contactPerson} label="Contact Person"><input className="dashboard-input" onChange={(event) => onChange("contactPerson", event.target.value)} value={form.contactPerson} /></Field>
           <Field error={errors.phone} label="Phone"><input className="dashboard-input" inputMode="numeric" maxLength={10} onChange={(event) => onChange("phone", event.target.value)} pattern="[0-9]*" value={form.phone} /></Field>
@@ -592,11 +619,13 @@ function isStaleSponsor(sponsor: Sponsor) {
   return haystack.includes("prachi handling");
 }
 
-function sponsorMatchesSearch(sponsor: Sponsor, query: string) {
+function sponsorMatchesSearch(sponsor: Sponsor, query: string, events: EventOSData["events"]) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
+  const eventName = events.find((event) => event.id === sponsor.eventId)?.name ?? "Workspace-wide";
 
   return [
+    eventName,
     sponsor.companyName,
     sponsor.contactPerson,
     sponsor.phone ?? "",
@@ -667,6 +696,7 @@ function makeSponsorPayload(form: SponsorForm): Omit<Sponsor, "id"> {
     companyName: form.companyName.trim(),
     contactPerson: form.contactPerson.trim(),
     email: form.email.trim(),
+    eventId: form.eventId || undefined,
     nextFollowUp: form.nextFollowUp,
     notes: form.notes.trim(),
     paymentReceived: form.paymentReceived === "Yes",
@@ -676,16 +706,13 @@ function makeSponsorPayload(form: SponsorForm): Omit<Sponsor, "id"> {
   };
 }
 
-function sponsorToWriteInput(
-  sponsor: Omit<Sponsor, "id">,
-  eventId?: string,
-): SponsorWriteInput {
+function sponsorToWriteInput(sponsor: Omit<Sponsor, "id">): SponsorWriteInput {
   return {
     agreementUploaded: Boolean(sponsor.agreementUploaded),
     companyName: sponsor.companyName,
     contactPerson: sponsor.contactPerson,
     email: sponsor.email ?? "",
-    eventId,
+    eventId: sponsor.eventId,
     nextFollowUp: sponsor.nextFollowUp,
     notes: sponsor.notes,
     paymentReceived: Boolean(sponsor.paymentReceived),

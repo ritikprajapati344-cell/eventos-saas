@@ -110,9 +110,9 @@ function AuthenticatedApp() {
             />
           )}
         />
-        <Route path="/sponsors" element={<Sponsors activitiesData={activitiesData} sponsors={data.sponsors} sponsorsData={sponsorsData} setData={setData} />} />
-        <Route path="/artists" element={<Artists artists={data.artists} artistsData={artistsData} />} />
-        <Route path="/vendors" element={<Vendors vendors={data.vendors} vendorsData={vendorsData} />} />
+        <Route path="/sponsors" element={<Sponsors activitiesData={activitiesData} events={data.events} sponsors={data.sponsors} sponsorsData={sponsorsData} setData={setData} />} />
+        <Route path="/artists" element={<Artists artists={data.artists} artistsData={artistsData} events={data.events} />} />
+        <Route path="/vendors" element={<Vendors events={data.events} vendors={data.vendors} vendorsData={vendorsData} />} />
         <Route path="/ticketing" element={<Ticketing data={data} ticketingData={ticketingData} />} />
         <Route path="/finance" element={<Finance data={data} financeData={financeData} />} />
         <Route path="/expenses" element={<Expenses data={data} expensesData={expensesData} />} />

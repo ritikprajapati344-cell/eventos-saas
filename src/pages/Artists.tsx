@@ -1,23 +1,27 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Edit3, FileSignature, Hotel, Mic2, Plane, Plus, ReceiptIndianRupee, Trash2, X } from "lucide-react";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter } from "../components/EventFilter";
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { ArtistsDataSource } from "../hooks/useArtistsData";
 import type { ArtistWriteInput } from "../lib/artistsRepository";
-import type { Artist, ContractStatus, PaymentStatus } from "../types";
+import type { Artist, ContractStatus, EventOSData, PaymentStatus } from "../types";
 import { formatCurrency } from "../utils/finance";
 
 interface ArtistsProps {
   artists: Artist[];
   artistsData: ArtistsDataSource;
+  events: EventOSData["events"];
 }
 
 type ArtistContractStatus = ContractStatus | "Cancelled";
 
 type ArtistForm = {
   contractStatus: ArtistContractStatus;
+  eventId: string;
   fee: string;
   hotelCost: string;
   name: string;
@@ -33,6 +37,7 @@ const STORAGE_KEY = "eventos-demo-data-v2";
 
 const initialForm: ArtistForm = {
   contractStatus: "Draft",
+  eventId: "",
   fee: "",
   hotelCost: "0",
   name: "",
@@ -58,13 +63,14 @@ const contractTone: Record<ArtistContractStatus, "green" | "blue" | "red" | "sla
   "On Hold": "slate",
 };
 
-export default function Artists({ artists, artistsData }: ArtistsProps) {
+export default function Artists({ artists, artistsData, events }: ArtistsProps) {
   const [actionError, setActionError] = useState("");
   const [artistList, setArtistList] = useState<Artist[]>(() => (
     artistsData.isSupabaseMode ? [] : readStoredArtists() ?? artists
   ));
   const [editingArtistId, setEditingArtistId] = useState<string | null>(null);
   const [errors, setErrors] = useState<ArtistFormErrors>({});
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
   const [form, setForm] = useState<ArtistForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -87,8 +93,15 @@ export default function Artists({ artists, artistsData }: ArtistsProps) {
   }, []);
 
   const activeArtists = artistsData.isSupabaseMode ? artistsData.artists : artistList;
-  const filteredArtists = useMemo(() => activeArtists.filter((artist) => artistMatchesSearch(artist, globalQuery)), [activeArtists, globalQuery]);
-  const totals = useMemo(() => getArtistTotals(activeArtists), [activeArtists]);
+  const eventScopedArtists = useMemo(
+    () => activeArtists.filter((artist) => matchesEventFilter(artist.eventId, eventFilter)),
+    [activeArtists, eventFilter],
+  );
+  const filteredArtists = useMemo(
+    () => eventScopedArtists.filter((artist) => artistMatchesSearch(artist, globalQuery, events)),
+    [eventScopedArtists, events, globalQuery],
+  );
+  const totals = useMemo(() => getArtistTotals(eventScopedArtists), [eventScopedArtists]);
   const visibleActionError = actionError || artistsData.error;
   const formTotal = getArtistTotal({
     fee: Number(form.fee || 0),
@@ -112,6 +125,7 @@ export default function Artists({ artists, artistsData }: ArtistsProps) {
     setErrors({});
     setForm({
       contractStatus: normalizeContractStatus(artist.contractStatus),
+      eventId: artist.eventId ?? "",
       fee: String(artist.fee),
       hotelCost: String(artist.hotelCost),
       name: artist.name,
@@ -237,6 +251,8 @@ export default function Artists({ artists, artistsData }: ArtistsProps) {
         <KpiCard title="Hotel Cost" value={formatCurrency(totals.hotel)} helper="Rooms and hospitality" icon={Hotel} tone="danger" />
       </section>
 
+      <EventFilter events={events} onChange={setEventFilter} value={eventFilter} />
+
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
           {visibleActionError}
@@ -273,6 +289,7 @@ export default function Artists({ artists, artistsData }: ArtistsProps) {
                 <StatusBadge label={artist.paymentStatus} tone={paymentTone[artist.paymentStatus]} />
               </div>
               <p className="mt-3 min-h-[48px] break-words text-sm leading-6 text-app-muted">{artist.profile || "No notes added."}</p>
+              <EventContextChip className="mt-3 self-start" event={events.find((event) => event.id === artist.eventId)} />
 
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <Info label="Performance Fee" value={formatCurrency(artist.fee)} />
@@ -311,6 +328,7 @@ export default function Artists({ artists, artistsData }: ArtistsProps) {
         <ArtistModal
           editing={Boolean(editingArtistId)}
           errors={errors}
+          events={events}
           form={form}
           isSaving={isSaving}
           onCancel={closeModal}
@@ -326,6 +344,7 @@ export default function Artists({ artists, artistsData }: ArtistsProps) {
 function ArtistModal({
   editing,
   errors,
+  events,
   form,
   isSaving,
   onCancel,
@@ -335,6 +354,7 @@ function ArtistModal({
 }: {
   editing: boolean;
   errors: ArtistFormErrors;
+  events: EventOSData["events"];
   form: ArtistForm;
   isSaving: boolean;
   onCancel: () => void;
@@ -361,6 +381,12 @@ function ArtistModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Event">
+            <select className="dashboard-input" onChange={(event) => onChange("eventId", event.target.value)} value={form.eventId}>
+              <option value="">Workspace-wide / Unassigned</option>
+              {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            </select>
+          </Field>
           <Field error={errors.name} label="Artist Name"><input className="dashboard-input" onChange={(event) => onChange("name", event.target.value)} value={form.name} /></Field>
           <Field label="Performance Slot"><input className="dashboard-input" onChange={(event) => onChange("performanceSlot", event.target.value)} value={form.performanceSlot} /></Field>
           <Field error={errors.fee} label="Performance Fee"><input className="dashboard-input" min={0} onChange={(event) => onChange("fee", event.target.value)} type="number" value={form.fee} /></Field>
@@ -444,11 +470,13 @@ function Info({ className = "", label, value }: { className?: string; label: str
   );
 }
 
-function artistMatchesSearch(artist: Artist, query: string) {
+function artistMatchesSearch(artist: Artist, query: string, events: EventOSData["events"]) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
+  const eventName = events.find((event) => event.id === artist.eventId)?.name ?? "Workspace-wide";
 
   return [
+    eventName,
     artist.name,
     artist.performanceSlot,
     artist.contractStatus,
@@ -491,6 +519,7 @@ function isNonNegativeNumber(value: string) {
 function makeArtistPayload(form: ArtistForm): Omit<Artist, "id"> {
   return {
     contractStatus: form.contractStatus as ContractStatus,
+    eventId: form.eventId || undefined,
     fee: Number(form.fee),
     hotelCost: Number(form.hotelCost || 0),
     name: form.name.trim(),
@@ -504,7 +533,7 @@ function makeArtistPayload(form: ArtistForm): Omit<Artist, "id"> {
 function artistToWriteInput(artist: Omit<Artist, "id">, existingArtist?: Artist): ArtistWriteInput {
   return {
     contractStatus: normalizeContractStatus(artist.contractStatus),
-    eventId: existingArtist?.eventId,
+    eventId: artist.eventId,
     fee: artist.fee,
     greenRoomCost: existingArtist?.greenRoomCost ?? artist.greenRoomCost ?? 0,
     hotelCost: artist.hotelCost,
