@@ -1,7 +1,13 @@
+import { useMemo, useState } from "react";
 import { BadgeIndianRupee, Download, FileSpreadsheet, FileText, TrendingUp, WalletCards } from "lucide-react";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter, UNASSIGNED_EVENTS_FILTER } from "../components/EventFilter";
 import { PageHeader } from "../components/PageHeader";
+import { useAuth } from "../hooks/useAuth";
+import { useFinanceData } from "../hooks/useFinanceData";
+import type { FinanceTransactionRecord } from "../lib/financeTransactionsRepository";
 import type { EventOSData, Expense, Sponsor } from "../types";
-import { formatCurrency, formatNumber, getNetProfit, getSponsorRevenue, getTotalExpenses, getTotalRevenue } from "../utils/finance";
+import { formatCurrency, formatNumber, getSponsorRevenue, getTotalExpenses, getTotalRevenue } from "../utils/finance";
 
 interface ReportsProps {
   data: EventOSData;
@@ -35,6 +41,10 @@ const reports = [
 ] as const;
 
 type ReportId = (typeof reports)[number]["id"];
+type ReportScope = {
+  filter: string;
+  label: string;
+};
 
 type ManagedExpense = Expense & {
   notes?: string;
@@ -43,23 +53,63 @@ type ManagedExpense = Expense & {
 };
 
 export default function Reports({ data }: ReportsProps) {
-  const totalRevenue = getTotalRevenue(data.events, data.sponsors, data.ticketCategories);
-  const totalExpenses = getTotalExpenses(data.expenses);
-  const netProfit = getNetProfit(data.events, data.sponsors, data.expenses, data.ticketCategories);
+  const { workspaceId } = useAuth();
+  const financeData = useFinanceData(workspaceId);
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
+  const localTransactions = useMemo(readStoredFinanceTransactions, []);
+  const activeTransactions = financeData.isSupabaseMode ? financeData.transactions : localTransactions;
+  const scopedData = useMemo(() => filterReportData(data, eventFilter), [data, eventFilter]);
+  const scopedTransactions = useMemo(
+    () => activeTransactions.filter((transaction) => matchesEventFilter(transaction.eventId, eventFilter)),
+    [activeTransactions, eventFilter],
+  );
+  const scope = getReportScope(data, eventFilter);
+  const financials = getReportFinancials(scopedData, scopedTransactions);
+  const selectedEvent = data.events.find((event) => event.id === eventFilter);
+  const isFinanceLoading = financeData.isSupabaseMode && financeData.isLoading;
+  const isFinanceUnavailable = financeData.isSupabaseMode && Boolean(financeData.error);
 
   return (
     <div className="space-y-6">
       <PageHeader title="Reports" description="Commercial reports for organizers, partners and internal event reviews." />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard icon={BadgeIndianRupee} label="Revenue" value={formatCurrency(totalRevenue)} />
-        <SummaryCard icon={WalletCards} label="Expenses" value={formatCurrency(totalExpenses)} />
-        <SummaryCard icon={TrendingUp} label="Net Profit" value={formatCurrency(netProfit)} positive />
+        <SummaryCard icon={BadgeIndianRupee} label="Revenue" value={formatCurrency(financials.revenue)} />
+        <SummaryCard icon={WalletCards} label="Expenses" value={formatCurrency(financials.expenses)} />
+        <SummaryCard icon={TrendingUp} label="Net Profit" value={formatCurrency(financials.profit)} positive={financials.profit >= 0} />
       </section>
+
+      <EventFilter events={data.events} onChange={setEventFilter} value={eventFilter} />
+
+      <section className="glass-panel flex flex-col gap-3 rounded-lg p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Report scope</p>
+          <p className="mt-1 break-words text-sm font-medium text-white">{scope.label}</p>
+        </div>
+        {eventFilter === ALL_EVENTS_FILTER ? (
+          <span className="inline-flex self-start rounded-full border border-app-primary/25 bg-app-primary/12 px-3 py-1.5 text-xs font-medium text-blue-100 sm:self-auto">
+            All Events
+          </span>
+        ) : (
+          <EventContextChip className="self-start sm:self-auto" event={selectedEvent} />
+        )}
+      </section>
+
+      {isFinanceUnavailable && (
+        <div className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-4 py-3 text-sm text-amber-100">
+          Finance transactions could not be loaded. Other report data remains available, and no local finance fallback was used.
+        </div>
+      )}
+      {isFinanceLoading && (
+        <div className="rounded-lg border border-app-primary/25 bg-app-primary/10 px-4 py-3 text-sm text-blue-100">
+          Loading finance transactions before reports can be exported...
+        </div>
+      )}
 
       <section className="grid gap-4 lg:grid-cols-2">
         {reports.map((report) => {
           const Icon = report.icon;
+          const reportData = buildReport(report.id, scopedData, scopedTransactions, data, scope);
           return (
             <article key={report.title} className="glass-panel rounded-lg p-4 sm:p-5">
               <div className="flex flex-col items-start gap-4 min-[430px]:flex-row">
@@ -69,9 +119,14 @@ export default function Reports({ data }: ReportsProps) {
                 <div className="min-w-0 flex-1">
                   <h2 className="text-lg font-semibold text-white">{report.title}</h2>
                   <p className="mt-2 text-sm leading-6 text-app-muted">{report.description}</p>
+                  <p className={`mt-3 text-xs ${reportData.rows.length > 0 ? "text-slate-400" : "text-amber-200"}`}>
+                    {reportData.rows.length > 0
+                      ? `${formatNumber(reportData.rows.length)} report ${reportData.rows.length === 1 ? "row" : "rows"} in ${scope.label}`
+                      : `No ${report.title.toLowerCase()} data for ${scope.label}.`}
+                  </p>
                   <div className="mt-5 flex flex-wrap gap-3">
-                    <ExportButton label="PDF" icon={FileText} onClick={() => exportPdf(report.id, data)} />
-                    <ExportButton label="Excel" icon={FileSpreadsheet} onClick={() => exportCsv(report.id, data)} />
+                    <ExportButton disabled={isFinanceLoading} label="PDF" icon={FileText} onClick={() => exportPdf(report.id, scopedData, scopedTransactions, data, scope)} />
+                    <ExportButton disabled={isFinanceLoading} label="Excel" icon={FileSpreadsheet} onClick={() => exportCsv(report.id, scopedData, scopedTransactions, data, scope)} />
                   </div>
                 </div>
               </div>
@@ -83,18 +138,28 @@ export default function Reports({ data }: ReportsProps) {
       <section className="glass-panel rounded-lg p-5">
         <h2 className="text-base font-semibold text-white">Profit Formula</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <FormulaTile label="Total Revenue" value={formatCurrency(totalRevenue)} helper={`Includes ${formatCurrency(getSponsorRevenue(data.sponsors))} sponsor revenue`} />
-          <FormulaTile label="Total Expenses" value={formatCurrency(totalExpenses)} helper="From venue, artist, marketing and operations" />
-          <FormulaTile label="Net Profit" value={formatCurrency(netProfit)} helper="Revenue minus expenses" />
+          <FormulaTile label="Total Revenue" value={formatCurrency(financials.revenue)} helper={`Includes ${formatCurrency(getSponsorRevenue(scopedData.sponsors))} sponsor revenue and recorded income`} />
+          <FormulaTile label="Total Expenses" value={formatCurrency(financials.expenses)} helper="Expense records plus recorded finance expenses" />
+          <FormulaTile label="Net Profit" value={formatCurrency(financials.profit)} helper={`Revenue minus expenses for ${scope.label}`} />
         </div>
       </section>
     </div>
   );
 }
 
-function ExportButton({ icon: Icon, label, onClick }: { icon: typeof FileText; label: string; onClick: () => void }) {
+function ExportButton({
+  disabled = false,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  disabled?: boolean;
+  icon: typeof FileText;
+  label: string;
+  onClick: () => void;
+}) {
   return (
-    <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]" onClick={onClick} type="button">
+    <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50" disabled={disabled} onClick={onClick} type="button">
       <Icon size={17} />
       <span>{label}</span>
     </button>
@@ -127,85 +192,151 @@ function FormulaTile({ label, value, helper }: { label: string; value: string; h
   );
 }
 
-function exportPdf(reportId: ReportId, data: EventOSData) {
-  const report = buildReport(reportId, data);
-  const summary = buildSummaryRows(data);
+function exportPdf(
+  reportId: ReportId,
+  data: EventOSData,
+  transactions: FinanceTransactionRecord[],
+  lookupData: EventOSData,
+  scope: ReportScope,
+) {
+  const report = buildReport(reportId, data, transactions, lookupData, scope);
+  const summary = buildSummaryRows(data, transactions);
   const lines = [
     "EventOS",
     report.name,
     `Generated: ${new Date().toLocaleString("en-IN")}`,
+    `Scope: ${scope.label}`,
     "",
     "Summary",
     ...summary.map(([label, value]) => `${label}: ${formatPdfText(value)}`),
     "",
     report.name,
-    formatTableForPdf(report.headers, report.rows.map((row) => row.map(formatPdfText))),
+    formatTableForPdf(
+      report.headers,
+      report.rows.map((row) => row.map(formatPdfText)),
+      `No records found for ${scope.label}`,
+    ),
   ].flat();
   downloadBlob(makePdfBlob(lines), `${report.fileBase}.pdf`);
 }
 
-function exportCsv(reportId: ReportId, data: EventOSData) {
-  const report = buildReport(reportId, data);
+function exportCsv(
+  reportId: ReportId,
+  data: EventOSData,
+  transactions: FinanceTransactionRecord[],
+  lookupData: EventOSData,
+  scope: ReportScope,
+) {
+  const report = buildReport(reportId, data, transactions, lookupData, scope);
   const rows = [
     ["EventOS", report.name],
     ["Generated", new Date().toLocaleString("en-IN")],
+    ["Scope", scope.label],
     [],
-    ...buildSummaryRows(data),
+    ...buildSummaryRows(data, transactions),
     [],
     report.headers,
-    ...(report.rows.length > 0 ? report.rows : [["No records found"]]),
+    ...(report.rows.length > 0 ? report.rows : [[`No records found for ${scope.label}`]]),
   ];
   const csv = rows.map((row) => row.map(escapeCsvCell).join(",")).join("\r\n");
   downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${report.fileBase}.csv`);
 }
 
-function buildReport(reportId: ReportId, data: EventOSData) {
+function buildReport(
+  reportId: ReportId,
+  data: EventOSData,
+  transactions: FinanceTransactionRecord[],
+  lookupData: EventOSData,
+  scope: ReportScope,
+) {
   if (reportId === "revenue") {
+    const categorizedEventIds = new Set(data.ticketCategories.map((ticket) => ticket.eventId));
     const ticketRows = data.ticketCategories.map((ticket) => [
+      getEventName(ticket.eventId, lookupData),
       "Ticket",
       ticket.name,
       formatNumber(ticket.sold),
       formatCurrency(ticket.sold * ticket.price),
       "",
+      "",
     ]);
+    const legacyTicketRows = data.events
+      .filter((event) => !categorizedEventIds.has(event.id) && event.ticketsSold > 0)
+      .map((event) => [
+        event.name,
+        "Ticket",
+        "Legacy ticket sales",
+        formatNumber(event.ticketsSold),
+        formatCurrency(event.ticketsSold * event.ticketPrice),
+        "",
+        "",
+      ]);
     const sponsorRows = data.sponsors.map((sponsor) => [
+      getEventName(sponsor.eventId, lookupData),
       "Sponsor",
       sponsor.companyName,
       "",
       "",
       formatCurrency(sponsor.sponsorshipAmount),
+      "",
     ]);
+    const financeRows = transactions
+      .filter((transaction) => transaction.type === "Income")
+      .map((transaction) => [
+        getEventName(transaction.eventId, lookupData),
+        "Finance Income",
+        transaction.source,
+        "",
+        formatCurrency(transaction.amount),
+        "",
+        formatDate(transaction.date),
+      ]);
 
     return {
       fileBase: "eventos-revenue-report",
-      headers: ["Type", "Name", "Sold", "Ticket Revenue", "Sponsor Revenue"],
+      headers: ["Event", "Type", "Name / Source", "Sold", "Revenue", "Sponsor Value", "Date"],
       name: "Revenue Report",
-      rows: [...ticketRows, ...sponsorRows],
+      rows: [...ticketRows, ...legacyTicketRows, ...sponsorRows, ...financeRows],
     };
   }
 
   if (reportId === "expense") {
+    const expenseRows = (data.expenses as ManagedExpense[]).map((expense) => [
+      getEventName(expense.eventId, lookupData),
+      expense.category,
+      expense.description,
+      getVendorName(expense.vendorId, lookupData),
+      formatCurrency(expense.amount),
+      expense.paymentStatus ?? "Paid",
+      formatDate(expense.date),
+    ]);
+    const financeRows = transactions
+      .filter((transaction) => transaction.type === "Expense")
+      .map((transaction) => [
+        getEventName(transaction.eventId, lookupData),
+        `Finance - ${transaction.source}`,
+        transaction.notes || "Recorded finance expense",
+        "Direct Expense",
+        formatCurrency(transaction.amount),
+        "Recorded",
+        formatDate(transaction.date),
+      ]);
+
     return {
       fileBase: "eventos-expense-report",
-      headers: ["Category", "Description", "Vendor", "Amount", "Status", "Date"],
+      headers: ["Event", "Category", "Description", "Vendor", "Amount", "Status", "Date"],
       name: "Expense Report",
-      rows: (data.expenses as ManagedExpense[]).map((expense) => [
-        expense.category,
-        expense.description,
-        getVendorName(expense.vendorId, data),
-        formatCurrency(expense.amount),
-        expense.paymentStatus ?? "Paid",
-        formatDate(expense.date),
-      ]),
+      rows: [...expenseRows, ...financeRows],
     };
   }
 
   if (reportId === "sponsor") {
     return {
       fileBase: "eventos-sponsor-report",
-      headers: ["Company", "Contact", "Amount", "Stage", "Payment Status"],
+      headers: ["Event", "Company", "Contact", "Amount", "Stage", "Payment Status"],
       name: "Sponsor Report",
       rows: data.sponsors.map((sponsor) => [
+        getEventName(sponsor.eventId, lookupData),
         sponsor.companyName,
         sponsor.contactPerson,
         formatCurrency(sponsor.sponsorshipAmount),
@@ -215,29 +346,145 @@ function buildReport(reportId: ReportId, data: EventOSData) {
     };
   }
 
-  const revenue = getTotalRevenue(data.events, data.sponsors, data.ticketCategories);
-  const expenses = getTotalExpenses(data.expenses);
-  const profit = getNetProfit(data.events, data.sponsors, data.expenses, data.ticketCategories);
-  const margin = revenue > 0 ? `${((profit / revenue) * 100).toFixed(1)}%` : "0.0%";
-
   return {
     fileBase: "eventos-profit-report",
-    headers: ["Revenue", "Expenses", "Net Profit", "Profit Margin"],
+    headers: ["Event", "Revenue", "Expenses", "Net Profit", "Profit Margin"],
     name: "Profit Report",
-    rows: [[formatCurrency(revenue), formatCurrency(expenses), formatCurrency(profit), margin]],
+    rows: buildProfitRows(data, transactions, lookupData, scope),
   };
 }
 
-function buildSummaryRows(data: EventOSData) {
+function buildProfitRows(
+  data: EventOSData,
+  transactions: FinanceTransactionRecord[],
+  lookupData: EventOSData,
+  scope: ReportScope,
+) {
+  if (!hasReportData(data, transactions)) return [];
+
+  if (scope.filter !== ALL_EVENTS_FILTER) {
+    const financials = getReportFinancials(data, transactions);
+    return [[
+      scope.label,
+      formatCurrency(financials.revenue),
+      formatCurrency(financials.expenses),
+      formatCurrency(financials.profit),
+      getProfitMargin(financials.revenue, financials.profit),
+    ]];
+  }
+
+  const eventIds = new Set<string>();
+  data.events.forEach((event) => {
+    if (event.ticketsSold > 0) eventIds.add(event.id);
+  });
+  data.ticketCategories.forEach((ticket) => eventIds.add(ticket.eventId));
+  data.sponsors.forEach((sponsor) => {
+    if (sponsor.eventId) eventIds.add(sponsor.eventId);
+  });
+  data.expenses.forEach((expense) => {
+    if (expense.eventId) eventIds.add(expense.eventId);
+  });
+  transactions.forEach((transaction) => {
+    if (transaction.eventId) eventIds.add(transaction.eventId);
+  });
+
+  const rows = [...eventIds]
+    .map((eventId) => {
+      const eventData = filterReportData(data, eventId);
+      const eventTransactions = transactions.filter((transaction) => transaction.eventId === eventId);
+      const financials = getReportFinancials(eventData, eventTransactions);
+      return [
+        getEventName(eventId, lookupData),
+        formatCurrency(financials.revenue),
+        formatCurrency(financials.expenses),
+        formatCurrency(financials.profit),
+        getProfitMargin(financials.revenue, financials.profit),
+      ];
+    })
+    .sort((left, right) => left[0].localeCompare(right[0]));
+
+  const unassignedData = filterReportData(data, UNASSIGNED_EVENTS_FILTER);
+  const unassignedTransactions = transactions.filter((transaction) => !transaction.eventId);
+  if (hasReportData(unassignedData, unassignedTransactions)) {
+    const financials = getReportFinancials(unassignedData, unassignedTransactions);
+    rows.push([
+      "Workspace-wide",
+      formatCurrency(financials.revenue),
+      formatCurrency(financials.expenses),
+      formatCurrency(financials.profit),
+      getProfitMargin(financials.revenue, financials.profit),
+    ]);
+  }
+
+  return rows;
+}
+
+function buildSummaryRows(data: EventOSData, transactions: FinanceTransactionRecord[]) {
+  const financials = getReportFinancials(data, transactions);
   return [
-    ["Revenue", formatCurrency(getTotalRevenue(data.events, data.sponsors, data.ticketCategories))],
-    ["Expenses", formatCurrency(getTotalExpenses(data.expenses))],
-    ["Profit", formatCurrency(getNetProfit(data.events, data.sponsors, data.expenses, data.ticketCategories))],
+    ["Revenue", formatCurrency(financials.revenue)],
+    ["Expenses", formatCurrency(financials.expenses)],
+    ["Profit", formatCurrency(financials.profit)],
   ];
 }
 
-function formatTableForPdf(headers: string[], rows: string[][]) {
-  if (rows.length === 0) return ["No records found"];
+function filterReportData(data: EventOSData, filter: string): EventOSData {
+  if (filter === ALL_EVENTS_FILTER) return data;
+
+  return {
+    ...data,
+    artists: data.artists.filter((artist) => matchesEventFilter(artist.eventId, filter)),
+    events: data.events.filter((event) => filter !== UNASSIGNED_EVENTS_FILTER && event.id === filter),
+    expenses: data.expenses.filter((expense) => matchesEventFilter(expense.eventId, filter)),
+    sponsors: data.sponsors.filter((sponsor) => matchesEventFilter(sponsor.eventId, filter)),
+    tasks: data.tasks.filter((task) => matchesEventFilter(task.eventId, filter)),
+    ticketCategories: data.ticketCategories.filter((ticket) => matchesEventFilter(ticket.eventId, filter)),
+    timeline: data.timeline.filter((item) => matchesEventFilter(item.eventId, filter)),
+    vendors: data.vendors.filter((vendor) => matchesEventFilter(vendor.eventId, filter)),
+  };
+}
+
+function getReportScope(data: EventOSData, filter: string): ReportScope {
+  if (filter === ALL_EVENTS_FILTER) return { filter, label: "All Events" };
+  if (filter === UNASSIGNED_EVENTS_FILTER) return { filter, label: "Workspace-wide / Unassigned" };
+
+  return {
+    filter,
+    label: data.events.find((event) => event.id === filter)?.name ?? "Unknown Event",
+  };
+}
+
+function getReportFinancials(data: EventOSData, transactions: FinanceTransactionRecord[]) {
+  const recordedIncome = transactions
+    .filter((transaction) => transaction.type === "Income")
+    .reduce((total, transaction) => total + transaction.amount, 0);
+  const recordedExpenses = transactions
+    .filter((transaction) => transaction.type === "Expense")
+    .reduce((total, transaction) => total + transaction.amount, 0);
+  const revenue = getTotalRevenue(data.events, data.sponsors, data.ticketCategories) + recordedIncome;
+  const expenses = getTotalExpenses(data.expenses) + recordedExpenses;
+
+  return {
+    expenses,
+    profit: revenue - expenses,
+    revenue,
+  };
+}
+
+function getProfitMargin(revenue: number, profit: number) {
+  return revenue > 0 ? `${((profit / revenue) * 100).toFixed(1)}%` : "0.0%";
+}
+
+function hasReportData(data: EventOSData, transactions: FinanceTransactionRecord[]) {
+  return data.events.some((event) => event.ticketsSold > 0)
+    || data.ticketCategories.length > 0
+    || data.sponsors.length > 0
+    || data.expenses.length > 0
+    || transactions.length > 0;
+}
+
+function formatTableForPdf(headers: string[], rows: string[][], emptyMessage: string) {
+  if (rows.length === 0) return [emptyMessage];
   const printableRows = [headers, ...rows];
   return printableRows.flatMap((row, index) => {
     const line = row.join(" | ");
@@ -329,10 +576,24 @@ function getVendorName(vendorId: string | undefined, data: EventOSData) {
   return data.vendors.find((vendor) => vendor.id === vendorId)?.name ?? "Direct Expense";
 }
 
+function getEventName(eventId: string | undefined, data: EventOSData) {
+  if (!eventId) return "Workspace-wide";
+  return data.events.find((event) => event.id === eventId)?.name ?? "Unknown Event";
+}
+
 function getSponsorPaymentStatus(sponsor: Sponsor) {
   return sponsor.paymentReceived ? "Paid" : "Pending";
 }
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("en-IN");
+}
+
+function readStoredFinanceTransactions() {
+  try {
+    const saved = localStorage.getItem("eventos-finance-transactions-v1");
+    return saved ? JSON.parse(saved) as FinanceTransactionRecord[] : [];
+  } catch {
+    return [];
+  }
 }
