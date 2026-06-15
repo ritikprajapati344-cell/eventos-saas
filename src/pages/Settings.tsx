@@ -18,7 +18,7 @@ const defaultSettings: SettingsState = {
   accentColor: "#3B82F6",
   compactDashboard: false,
   companyLogo: "",
-  companyName: "EventOS Demo Agency",
+  companyName: "EventOS Agency",
   contactNumber: "",
   dailyDigest: false,
   darkTheme: true,
@@ -193,7 +193,7 @@ export default function Settings({ settingsData }: SettingsProps) {
           </SettingsPanel>
 
           <SettingsPanel icon={SlidersHorizontal} title="Workspace Controls">
-            <Toggle checked={settings.localStorageMode} label="Local storage demo mode" onChange={(checked) => updateSetting("localStorageMode", checked)} />
+            <Toggle checked={settings.localStorageMode} label="Local workspace storage" onChange={(checked) => updateSetting("localStorageMode", checked)} />
             <Toggle checked={settings.exportButtons} label="Export buttons enabled" onChange={(checked) => updateSetting("exportButtons", checked)} />
             <Toggle checked={settings.profitUpdates} label="Auto profit updates" onChange={(checked) => updateSetting("profitUpdates", checked)} />
           </SettingsPanel>

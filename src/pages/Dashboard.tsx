@@ -298,7 +298,7 @@ export default function Dashboard({
         description="Clean operating dashboard for events, sponsors, tickets, tasks and financial visibility."
         action={
           <div className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300 md:block">
-            {isSupabaseMode ? "Cloud workspace" : "Local-first demo workspace"}
+            {isSupabaseMode ? "Supabase Workspace" : "Local Workspace"}
           </div>
         }
       />

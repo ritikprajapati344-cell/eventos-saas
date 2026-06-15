@@ -268,7 +268,7 @@ export default function Artists({ artists, artistsData, events }: ArtistsProps) 
         <section className="glass-panel rounded-lg p-8 text-center">
           <Mic2 className="mx-auto text-app-danger" size={28} />
           <h2 className="mt-4 text-lg font-semibold text-white">Artists are unavailable</h2>
-          <p className="mt-2 text-sm text-app-muted">No local or demo artists were loaded as a fallback.</p>
+          <p className="mt-2 text-sm text-app-muted">No fallback artists were loaded.</p>
         </section>
       ) : (
         <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">

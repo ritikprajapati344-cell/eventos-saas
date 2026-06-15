@@ -262,7 +262,7 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
         <section className="glass-panel rounded-lg p-8 text-center">
           <ReceiptText className="mx-auto text-app-danger" size={28} />
           <h2 className="mt-4 text-lg font-semibold text-white">Expenses are unavailable</h2>
-          <p className="mt-2 text-sm text-app-muted">No local or demo expenses were loaded as a fallback.</p>
+          <p className="mt-2 text-sm text-app-muted">No fallback expenses were loaded.</p>
         </section>
       ) : (
         <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">

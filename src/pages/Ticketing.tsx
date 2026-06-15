@@ -275,7 +275,7 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
         <section className="glass-panel rounded-lg p-8 text-center">
           <Ticket className="mx-auto text-app-danger" size={28} />
           <h2 className="mt-4 text-lg font-semibold text-white">Ticket categories are unavailable</h2>
-          <p className="mt-2 text-sm text-app-muted">No local or demo ticket categories were loaded as a fallback.</p>
+          <p className="mt-2 text-sm text-app-muted">No fallback ticket categories were loaded.</p>
         </section>
       ) : (
         <>

@@ -334,7 +334,7 @@ export default function Sponsors({ activitiesData, events, sponsors, sponsorsDat
         <section className="glass-panel rounded-lg p-8 text-center">
           <Handshake className="mx-auto text-app-danger" size={28} />
           <h2 className="mt-4 text-lg font-semibold text-white">Sponsors are unavailable</h2>
-          <p className="mt-2 text-sm text-app-muted">No local or demo sponsors were loaded as a fallback.</p>
+          <p className="mt-2 text-sm text-app-muted">No fallback sponsors were loaded.</p>
         </section>
       ) : sponsorsData.isSupabaseMode && cleanSponsors.length === 0 ? (
         <section className="glass-panel rounded-lg p-8 text-center">

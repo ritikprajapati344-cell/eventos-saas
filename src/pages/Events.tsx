@@ -402,7 +402,7 @@ export default function Events({ activitiesData, data, eventFilesData, eventsDat
         <section className="glass-panel rounded-lg p-8 text-center">
           <CalendarPlus className="mx-auto text-app-danger" size={28} />
           <h2 className="mt-4 text-lg font-semibold text-white">Events are unavailable</h2>
-          <p className="mt-2 text-sm text-app-muted">No local or demo events were loaded as a fallback.</p>
+          <p className="mt-2 text-sm text-app-muted">No fallback events were loaded.</p>
         </section>
       ) : eventsData.isSupabaseMode && data.events.length === 0 && !visibleActionError ? (
         <section className="glass-panel rounded-lg p-8 text-center">

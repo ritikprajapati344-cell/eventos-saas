@@ -75,7 +75,11 @@ function AuthenticatedApp() {
     : localData;
 
   return (
-    <AppLayout data={data}>
+    <AppLayout
+      data={data}
+      isSupabaseMode={settingsData.isSupabaseMode}
+      workspaceName={settingsData.settings?.companyName}
+    >
       <Routes>
         <Route
           path="/"

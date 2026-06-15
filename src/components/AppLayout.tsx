@@ -8,11 +8,21 @@ import type { EventOSData } from "../types";
 interface AppLayoutProps {
   children: ReactNode;
   data: EventOSData;
+  isSupabaseMode: boolean;
+  workspaceName?: string;
 }
 
-export function AppLayout({ children, data }: AppLayoutProps) {
+export function AppLayout({
+  children,
+  data,
+  isSupabaseMode,
+  workspaceName,
+}: AppLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
+  const workspaceLabel = isSupabaseMode
+    ? workspaceName?.trim() || "Supabase Workspace"
+    : "Local Workspace";
 
   useEffect(() => {
     const enforceDarkTheme = () => applyThemeSettings({});
@@ -72,7 +82,7 @@ export function AppLayout({ children, data }: AppLayoutProps) {
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden rounded-lg border border-app-primary/25 bg-app-primary/10 px-3 py-2 text-sm text-app-primary lg:flex">
                 <Sparkles className="mr-2 h-4 w-4 text-app-primary" />
-                Demo Workspace
+                {workspaceLabel}
               </div>
               <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-app-primary to-app-success font-semibold text-white shadow-glow">
                 EO

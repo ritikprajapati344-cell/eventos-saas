@@ -241,7 +241,7 @@ export default function Vendors({ events, vendors, vendorsData }: VendorsProps) 
         <section className="glass-panel rounded-lg p-8 text-center">
           <Hammer className="mx-auto text-app-danger" size={28} />
           <h2 className="mt-4 text-lg font-semibold text-white">Vendors are unavailable</h2>
-          <p className="mt-2 text-sm text-app-muted">No local or demo vendors were loaded as a fallback.</p>
+          <p className="mt-2 text-sm text-app-muted">No fallback vendors were loaded.</p>
         </section>
       ) : (
         <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
