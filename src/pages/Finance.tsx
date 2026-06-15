@@ -16,6 +16,8 @@ import {
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter, UNASSIGNED_EVENTS_FILTER } from "../components/EventFilter";
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
@@ -38,6 +40,7 @@ interface FinanceProps {
 type TransactionForm = {
   amount: string;
   date: string;
+  eventId: string;
   notes: string;
   paymentMode: PaymentMode;
   source: TransactionSource;
@@ -51,6 +54,7 @@ const TRANSACTION_STORAGE_KEY = "eventos-finance-transactions-v1";
 const initialForm: TransactionForm = {
   amount: "",
   date: new Date().toISOString().slice(0, 10),
+  eventId: "",
   notes: "",
   paymentMode: "UPI",
   source: "Other",
@@ -72,6 +76,7 @@ export default function Finance({ data, financeData }: FinanceProps) {
   const [actionError, setActionError] = useState("");
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [errors, setErrors] = useState<TransactionErrors>({});
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
   const [form, setForm] = useState<TransactionForm>(initialForm);
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -90,19 +95,27 @@ export default function Finance({ data, financeData }: FinanceProps) {
   }, []);
 
   const activeTransactions = financeData.isSupabaseMode ? financeData.transactions : transactions;
-  const ledgerTotals = useMemo(() => getLedgerTotals(activeTransactions), [activeTransactions]);
-  const filteredTransactions = useMemo(() => activeTransactions.filter((transaction) => transactionMatchesSearch(transaction, globalQuery)), [activeTransactions, globalQuery]);
-  const ticketRevenue = getTicketRevenue(data.events, data.ticketCategories);
-  const sponsorRevenue = getSponsorRevenue(data.sponsors);
-  const baseRevenue = getTotalRevenue(data.events, data.sponsors, data.ticketCategories);
-  const baseExpenses = getTotalExpenses(data.expenses);
-  const baseProfit = getNetProfit(data.events, data.sponsors, data.expenses, data.ticketCategories);
+  const eventScopedTransactions = useMemo(
+    () => activeTransactions.filter((transaction) => matchesEventFilter(transaction.eventId, eventFilter)),
+    [activeTransactions, eventFilter],
+  );
+  const eventScopedData = useMemo(() => getEventScopedFinanceData(data, eventFilter), [data, eventFilter]);
+  const ledgerTotals = useMemo(() => getLedgerTotals(eventScopedTransactions), [eventScopedTransactions]);
+  const filteredTransactions = useMemo(
+    () => eventScopedTransactions.filter((transaction) => transactionMatchesSearch(transaction, globalQuery, data.events)),
+    [data.events, eventScopedTransactions, globalQuery],
+  );
+  const ticketRevenue = getTicketRevenue(eventScopedData.events, eventScopedData.ticketCategories);
+  const sponsorRevenue = getSponsorRevenue(eventScopedData.sponsors);
+  const baseRevenue = getTotalRevenue(eventScopedData.events, eventScopedData.sponsors, eventScopedData.ticketCategories);
+  const baseExpenses = getTotalExpenses(eventScopedData.expenses);
+  const baseProfit = getNetProfit(eventScopedData.events, eventScopedData.sponsors, eventScopedData.expenses, eventScopedData.ticketCategories);
   const totalRevenue = baseRevenue + ledgerTotals.income;
   const expenses = baseExpenses + ledgerTotals.expense;
   const profit = baseProfit + ledgerTotals.income - ledgerTotals.expense;
   const profitMargin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
-  const receivables = getReceivablePayableSummary(data);
-  const breakdown = getPaymentBreakdown(data);
+  const receivables = getReceivablePayableSummary(eventScopedData);
+  const breakdown = getPaymentBreakdown(eventScopedData);
   const visibleActionError = actionError || financeData.error;
 
   const openAddModal = () => {
@@ -122,6 +135,7 @@ export default function Finance({ data, financeData }: FinanceProps) {
     setForm({
       amount: String(transaction.amount),
       date: transaction.date,
+      eventId: transaction.eventId ?? "",
       notes: transaction.notes,
       paymentMode: transaction.paymentMode,
       source: transaction.source,
@@ -156,10 +170,7 @@ export default function Finance({ data, financeData }: FinanceProps) {
       setIsSaving(true);
       setActionError("");
       try {
-        const existingTransaction = editingTransactionId
-          ? activeTransactions.find((transaction) => transaction.id === editingTransactionId)
-          : undefined;
-        const writeInput = transactionToWriteInput(payload, existingTransaction);
+        const writeInput = transactionToWriteInput(payload);
 
         if (editingTransactionId) {
           await financeData.updateTransaction(editingTransactionId, writeInput);
@@ -235,6 +246,8 @@ export default function Finance({ data, financeData }: FinanceProps) {
         <KpiCard title="Vendor Payable" value={formatCurrency(receivables.vendorPayable)} helper="Remaining vendor balances" icon={WalletCards} tone="danger" />
         <KpiCard title="Artist Payable" value={formatCurrency(receivables.artistPayable)} helper="Unpaid artist balances" icon={BadgeIndianRupee} tone="danger" />
       </section>
+
+      <EventFilter events={data.events} onChange={setEventFilter} value={eventFilter} />
 
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
@@ -317,10 +330,11 @@ export default function Finance({ data, financeData }: FinanceProps) {
             <p className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm text-app-muted">No finance transactions yet.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="premium-table w-full min-w-[940px] text-left text-sm">
+              <table className="premium-table w-full min-w-[1080px] text-left text-sm">
                 <thead className="text-xs uppercase tracking-[0.12em] text-app-muted">
                   <tr>
                     <th className="px-4 py-2">Date</th>
+                    <th className="px-4 py-2">Event</th>
                     <th className="px-4 py-2">Type</th>
                     <th className="px-4 py-2">Source</th>
                     <th className="px-4 py-2">Payment Mode</th>
@@ -333,6 +347,9 @@ export default function Finance({ data, financeData }: FinanceProps) {
                   {filteredTransactions.map((transaction) => (
                     <tr key={transaction.id} className="bg-white/[0.04]">
                       <td className="rounded-l-lg px-4 py-4 text-slate-300">{new Date(transaction.date).toLocaleDateString("en-IN")}</td>
+                      <td className="px-4 py-4">
+                        <EventContextChip event={data.events.find((event) => event.id === transaction.eventId)} />
+                      </td>
                       <td className="px-4 py-4">
                         <StatusBadge label={transaction.type} tone={transaction.type === "Income" ? "green" : "red"} />
                       </td>
@@ -359,6 +376,7 @@ export default function Finance({ data, financeData }: FinanceProps) {
         <TransactionModal
           editing={Boolean(editingTransactionId)}
           errors={errors}
+          events={data.events}
           form={form}
           isSaving={isSaving}
           onCancel={closeModal}
@@ -373,6 +391,7 @@ export default function Finance({ data, financeData }: FinanceProps) {
 function TransactionModal({
   editing,
   errors,
+  events,
   form,
   isSaving,
   onCancel,
@@ -381,6 +400,7 @@ function TransactionModal({
 }: {
   editing: boolean;
   errors: TransactionErrors;
+  events: EventOSData["events"];
   form: TransactionForm;
   isSaving: boolean;
   onCancel: () => void;
@@ -401,6 +421,12 @@ function TransactionModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Event">
+            <select className="dashboard-input" onChange={(event) => onChange("eventId", event.target.value)} value={form.eventId}>
+              <option value="">Workspace-wide / Unassigned</option>
+              {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            </select>
+          </Field>
           <Field error={errors.date} label="Date"><input className="dashboard-input" onChange={(event) => onChange("date", event.target.value)} type="date" value={form.date} /></Field>
           <Field error={errors.type} label="Type">
             <select className="dashboard-input" onChange={(event) => onChange("type", event.target.value)} value={form.type}>
@@ -515,6 +541,7 @@ function makeTransactionPayload(form: TransactionForm): Omit<FinanceTransaction,
   return {
     amount: Number(form.amount),
     date: form.date,
+    eventId: form.eventId || undefined,
     notes: form.notes.trim(),
     paymentMode: form.paymentMode,
     source: form.source,
@@ -522,14 +549,11 @@ function makeTransactionPayload(form: TransactionForm): Omit<FinanceTransaction,
   };
 }
 
-function transactionToWriteInput(
-  transaction: Omit<FinanceTransaction, "id">,
-  existingTransaction?: FinanceTransaction,
-): FinanceTransactionWriteInput {
+function transactionToWriteInput(transaction: Omit<FinanceTransaction, "id">): FinanceTransactionWriteInput {
   return {
     amount: transaction.amount,
     date: transaction.date,
-    eventId: existingTransaction?.eventId,
+    eventId: transaction.eventId,
     notes: transaction.notes,
     paymentMode: transaction.paymentMode,
     source: transaction.source,
@@ -603,11 +627,16 @@ function getArtistPendingAmount(artist: Artist) {
   return Math.max(getArtistTotal(artist) - getArtistPaidAmount(artist), 0);
 }
 
-function transactionMatchesSearch(transaction: FinanceTransaction, query: string) {
+function transactionMatchesSearch(
+  transaction: FinanceTransaction,
+  query: string,
+  events: EventOSData["events"],
+) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
 
   return [
+    events.find((event) => event.id === transaction.eventId)?.name ?? "Workspace-wide",
     transaction.type,
     transaction.source,
     String(transaction.amount),
@@ -617,6 +646,20 @@ function transactionMatchesSearch(transaction: FinanceTransaction, query: string
     transaction.date,
     new Date(transaction.date).toLocaleDateString("en-IN"),
   ].some((value) => value.toLowerCase().includes(normalizedQuery));
+}
+
+function getEventScopedFinanceData(data: EventOSData, filter: string): EventOSData {
+  if (filter === ALL_EVENTS_FILTER) return data;
+
+  return {
+    ...data,
+    artists: data.artists.filter((artist) => matchesEventFilter(artist.eventId, filter)),
+    events: data.events.filter((event) => filter !== UNASSIGNED_EVENTS_FILTER && event.id === filter),
+    expenses: data.expenses.filter((expense) => matchesEventFilter(expense.eventId, filter)),
+    sponsors: data.sponsors.filter((sponsor) => matchesEventFilter(sponsor.eventId, filter)),
+    ticketCategories: data.ticketCategories.filter((ticket) => matchesEventFilter(ticket.eventId, filter)),
+    vendors: data.vendors.filter((vendor) => matchesEventFilter(vendor.eventId, filter)),
+  };
 }
 
 function readStoredTransactions() {

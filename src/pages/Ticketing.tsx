@@ -4,6 +4,8 @@ import { BadgeCheck, CircleDollarSign, DoorOpen, Edit3, Plus, Star, Ticket, Tick
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter } from "../components/EventFilter";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
@@ -60,6 +62,7 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
   const [createForm, setCreateForm] = useState<TicketCreateForm>(initialCreateForm);
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
   const [errors, setErrors] = useState<TicketEditorErrors>({});
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
   const [form, setForm] = useState<TicketEditorForm>({ additionalSold: "0", inventory: "", price: "" });
   const [globalQuery, setGlobalQuery] = useState(() => sessionStorage.getItem("eventos-global-search") ?? "");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -85,10 +88,17 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
   }, []);
 
   const activeTickets = ticketingData.isSupabaseMode ? ticketingData.ticketCategories : ticketList;
-  const totals = useMemo(() => getTicketTotals(activeTickets), [activeTickets]);
-  const filteredTickets = useMemo(() => activeTickets.filter((ticket) => ticketMatchesSearch(ticket, globalQuery)), [activeTickets, globalQuery]);
+  const eventScopedTickets = useMemo(
+    () => activeTickets.filter((ticket) => matchesEventFilter(ticket.eventId, eventFilter)),
+    [activeTickets, eventFilter],
+  );
+  const totals = useMemo(() => getTicketTotals(eventScopedTickets), [eventScopedTickets]);
+  const filteredTickets = useMemo(
+    () => eventScopedTickets.filter((ticket) => ticketMatchesSearch(ticket, globalQuery, data.events)),
+    [data.events, eventScopedTickets, globalQuery],
+  );
   const chartData = filteredTickets.map((ticket) => ({ name: ticket.name, sold: ticket.sold, available: getAvailable(ticket) }));
-  const bestSeller = getBestSellingCategory(activeTickets);
+  const bestSeller = getBestSellingCategory(eventScopedTickets);
   const editingTicket = activeTickets.find((ticket) => ticket.id === editingTicketId);
   const visibleActionError = actionError || ticketingData.error;
 
@@ -254,6 +264,8 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
         </div>
       )}
 
+      <EventFilter events={data.events} onChange={setEventFilter} value={eventFilter} />
+
       {ticketingData.isSupabaseMode && ticketingData.isLoading ? (
         <section className="glass-panel rounded-lg p-8 text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-app-primary/30 border-t-app-primary" />
@@ -271,7 +283,13 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
         <TicketKpi title="Ticket Inventory" value={formatNumber(totals.inventory)} helper="Total configured tickets" icon={Tickets} />
         <TicketKpi title="Tickets Sold" value={formatNumber(totals.sold)} helper={`${getSellThrough(totals.sold, totals.inventory)}% sell-through`} icon={Ticket} tone="success" />
         <TicketKpi title="Available Tickets" value={formatNumber(totals.available)} helper="Remaining inventory" icon={DoorOpen} tone="warning" />
-        <TicketKpi title="Ticket Revenue" value={formatCurrency(totals.revenue)} helper="Category-wise revenue" icon={CircleDollarSign} tone="success" />
+        <TicketKpi
+          title="Ticket Revenue"
+          value={totals.sold > 0 ? formatCurrency(totals.revenue) : "No sales yet"}
+          helper={totals.sold > 0 ? "Category-wise revenue" : "Revenue begins after ticket sales"}
+          icon={CircleDollarSign}
+          tone="success"
+        />
         <TicketKpi
           title="Best Seller"
           value={bestSeller ? bestSeller.name : "No sales"}
@@ -308,10 +326,11 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
             <p className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm text-app-muted">No matching ticket categories.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="premium-table w-full min-w-[980px] text-left text-sm">
+              <table className="premium-table w-full min-w-[1120px] text-left text-sm">
                 <thead className="text-xs uppercase tracking-[0.12em] text-app-muted">
                   <tr>
                     <th className="px-4 py-2">Category</th>
+                    <th className="px-4 py-2">Event</th>
                     <th className="px-4 py-2 text-right">Price</th>
                     <th className="px-4 py-2 text-right">Inventory</th>
                     <th className="px-4 py-2 text-right">Sold</th>
@@ -327,11 +346,16 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
                     return (
                       <tr key={ticket.id} className="bg-white/[0.04]">
                         <td className="rounded-l-lg px-4 py-4 font-medium text-white">{ticket.name}</td>
+                        <td className="px-4 py-4">
+                          <EventContextChip event={data.events.find((event) => event.id === ticket.eventId)} />
+                        </td>
                         <td className="px-4 py-4 text-right text-slate-300">{formatCurrency(ticket.price)}</td>
                         <td className="px-4 py-4 text-right text-slate-300">{formatNumber(ticket.inventory)}</td>
                         <td className="px-4 py-4 text-right text-slate-300">{formatNumber(ticket.sold)}</td>
                         <td className="px-4 py-4 text-right text-slate-300">{formatNumber(getAvailable(ticket))}</td>
-                        <td className="px-4 py-4 text-right font-semibold text-white">{formatCurrency(getTicketRevenue(ticket))}</td>
+                        <td className="px-4 py-4 text-right font-semibold text-white">
+                          {ticket.sold > 0 ? formatCurrency(getTicketRevenue(ticket)) : <span className="text-xs font-medium text-app-muted">No sales yet</span>}
+                        </td>
                         <td className="px-4 py-4">
                           <StatusBadge label={status} tone={getStatusTone(status)} />
                         </td>
@@ -369,6 +393,7 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
           onCancel={closeEditor}
           onChange={updateField}
           onSubmit={saveTicket}
+          event={data.events.find((event) => event.id === editingTicket.eventId)}
           ticket={editingTicket}
         />
       )}
@@ -390,6 +415,7 @@ export default function Ticketing({ data, ticketingData }: TicketingProps) {
 
 function TicketEditorModal({
   errors,
+  event,
   form,
   isSaving,
   onCancel,
@@ -398,6 +424,7 @@ function TicketEditorModal({
   ticket,
 }: {
   errors: TicketEditorErrors;
+  event?: EventOSData["events"][number];
   form: TicketEditorForm;
   isSaving: boolean;
   onCancel: () => void;
@@ -423,10 +450,12 @@ function TicketEditorModal({
           </button>
         </div>
 
+        <EventContextChip className="mb-4" event={event} />
+
         <div className="mb-4 grid gap-3 sm:grid-cols-3">
           <Summary label="Current Sold" value={formatNumber(ticket.sold)} />
           <Summary label="Available After Save" value={formatNumber(available)} />
-          <Summary label="Revenue After Save" value={formatCurrency(revenue)} />
+          <Summary label="Revenue After Save" value={sold > 0 ? formatCurrency(revenue) : "No sales yet"} />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -491,7 +520,7 @@ function TicketCreateModal({
 
         <div className="mb-4 grid gap-3 sm:grid-cols-3">
           <Summary label="Available" value={formatNumber(available)} />
-          <Summary label="Revenue" value={formatCurrency(revenue)} />
+          <Summary label="Revenue" value={sold > 0 ? formatCurrency(revenue) : "No sales yet"} />
           <Summary label="Status" value={getTicketStatusFromValues(sold, inventory)} />
         </div>
 
@@ -631,19 +660,20 @@ function getTicketTotals(tickets: TicketCategory[]) {
 }
 
 function getBestSellingCategory(tickets: TicketCategory[]) {
-  return tickets.reduce<TicketCategory | null>((best, ticket) => {
+  return tickets.filter((ticket) => ticket.sold > 0).reduce<TicketCategory | null>((best, ticket) => {
     if (!best || ticket.sold > best.sold) return ticket;
     return best;
   }, null);
 }
 
-function ticketMatchesSearch(ticket: TicketCategory, query: string) {
+function ticketMatchesSearch(ticket: TicketCategory, query: string, events: EventOSData["events"]) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
 
   const status = getTicketStatus(ticket);
   const revenue = getTicketRevenue(ticket);
   return [
+    events.find((event) => event.id === ticket.eventId)?.name ?? "",
     ticket.name,
     status,
     String(ticket.price),

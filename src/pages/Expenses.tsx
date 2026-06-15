@@ -1,6 +1,8 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Edit3, Landmark, PieChart, Plus, ReceiptText, Trash2, WalletCards, X } from "lucide-react";
+import { EventContextChip } from "../components/EventContextChip";
+import { ALL_EVENTS_FILTER, EventFilter, matchesEventFilter } from "../components/EventFilter";
 import { KpiCard } from "../components/KpiCard";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
@@ -30,6 +32,7 @@ type ExpenseForm = {
   customCategory: string;
   date: string;
   description: string;
+  eventId: string;
   notes: string;
   paymentStatus: ExpensePaymentStatus;
   vendorId: string;
@@ -46,6 +49,7 @@ const initialForm: ExpenseForm = {
   customCategory: "",
   date: new Date().toISOString().slice(0, 10),
   description: "",
+  eventId: "",
   notes: "",
   paymentStatus: "Pending",
   vendorId: directExpenseValue,
@@ -61,6 +65,7 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
   const [actionError, setActionError] = useState("");
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [errors, setErrors] = useState<ExpenseFormErrors>({});
+  const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
   const [expenseList, setExpenseList] = useState<ManagedExpense[]>(() => (
     expensesData.isSupabaseMode ? [] : readStoredExpenses() ?? data.expenses
   ));
@@ -90,10 +95,21 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
   }, []);
 
   const activeExpenses = expensesData.isSupabaseMode ? expensesData.expenses : expenseList;
-  const filteredExpenses = useMemo(() => activeExpenses.filter((expense) => expenseMatchesSearch(expense, vendors, globalQuery)), [activeExpenses, globalQuery, vendors]);
-  const totals = useMemo(() => getExpenseTotals(activeExpenses), [activeExpenses]);
-  const categories = useMemo(() => getCategoryTotals(activeExpenses), [activeExpenses]);
-  const largestExpense = getLargestExpense(activeExpenses);
+  const eventScopedExpenses = useMemo(
+    () => activeExpenses.filter((expense) => matchesEventFilter(expense.eventId, eventFilter)),
+    [activeExpenses, eventFilter],
+  );
+  const filteredExpenses = useMemo(
+    () => eventScopedExpenses.filter((expense) => expenseMatchesSearch(expense, vendors, data.events, globalQuery)),
+    [data.events, eventScopedExpenses, globalQuery, vendors],
+  );
+  const totals = useMemo(() => getExpenseTotals(eventScopedExpenses), [eventScopedExpenses]);
+  const categories = useMemo(() => getCategoryTotals(eventScopedExpenses), [eventScopedExpenses]);
+  const largestExpense = getLargestExpense(eventScopedExpenses);
+  const formVendors = useMemo(
+    () => vendors.filter((vendor) => isVendorAvailableForEvent(vendor, form.eventId)),
+    [form.eventId, vendors],
+  );
   const visibleActionError = actionError || expensesData.error;
 
   const openAddModal = () => {
@@ -115,6 +131,7 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
       ...getExpenseCategoryFormValues(expense.category),
       date: expense.date,
       description: expense.description,
+      eventId: expense.eventId ?? "",
       notes: expense.notes ?? "",
       paymentStatus: expense.paymentStatus ?? "Paid",
       vendorId: expense.vendorId ?? directExpenseValue,
@@ -130,13 +147,25 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
   };
 
   const updateField = (field: keyof ExpenseForm, value: string) => {
-    setForm((current) => ({ ...current, [field]: value }));
-    setErrors((current) => ({ ...current, [field]: undefined }));
+    setForm((current) => {
+      if (field !== "eventId") return { ...current, [field]: value };
+
+      const selectedVendor = vendors.find((vendor) => vendor.id === current.vendorId);
+      const vendorId = current.vendorId === directExpenseValue || (selectedVendor && isVendorAvailableForEvent(selectedVendor, value))
+        ? current.vendorId
+        : directExpenseValue;
+      return { ...current, eventId: value, vendorId };
+    });
+    setErrors((current) => ({
+      ...current,
+      [field]: undefined,
+      ...(field === "eventId" ? { vendorId: undefined } : {}),
+    }));
   };
 
   const saveExpense = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const validationErrors = validateExpenseForm(form);
+    const validationErrors = validateExpenseForm(form, vendors);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
@@ -148,10 +177,7 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
       setIsSaving(true);
       setActionError("");
       try {
-        const existingExpense = editingExpenseId
-          ? activeExpenses.find((expense) => expense.id === editingExpenseId)
-          : undefined;
-        const writeInput = expenseToWriteInput(payload, existingExpense);
+        const writeInput = expenseToWriteInput(payload);
 
         if (editingExpenseId) {
           await expensesData.updateExpense(editingExpenseId, writeInput);
@@ -219,6 +245,8 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
         <KpiCard title="Largest Expense" value={largestExpense ? formatCurrency(largestExpense.amount) : "₹0"} helper={largestExpense?.description ?? "No expense records"} icon={ReceiptText} tone="primary" />
       </section>
 
+      <EventFilter events={data.events} onChange={setEventFilter} value={eventFilter} />
+
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">
           {visibleActionError}
@@ -264,11 +292,12 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
             <p className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm text-app-muted">No expense records found.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="premium-table w-full min-w-[980px] text-left text-sm">
+              <table className="premium-table w-full min-w-[1120px] text-left text-sm">
                 <thead className="text-xs uppercase tracking-[0.12em] text-app-muted">
                   <tr>
                     <th className="px-4 py-2">Category</th>
                     <th className="px-4 py-2">Description</th>
+                    <th className="px-4 py-2">Event</th>
                     <th className="px-4 py-2">Vendor</th>
                     <th className="px-4 py-2 text-right">Amount</th>
                     <th className="px-4 py-2">Status</th>
@@ -285,6 +314,9 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
                         <td className="px-4 py-4 text-slate-300">
                           <p className="font-medium text-slate-200">{expense.description}</p>
                           {expense.notes && <p className="mt-1 text-xs text-app-muted">{expense.notes}</p>}
+                        </td>
+                        <td className="px-4 py-4">
+                          <EventContextChip event={data.events.find((event) => event.id === expense.eventId)} />
                         </td>
                         <td className="px-4 py-4 text-slate-300">{getVendorName(expense.vendorId, vendors)}</td>
                         <td className="px-4 py-4 text-right font-semibold text-white">{formatCurrency(expense.amount)}</td>
@@ -311,12 +343,13 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
         <ExpenseModal
           editing={Boolean(editingExpenseId)}
           errors={errors}
+          events={data.events}
           form={form}
           isSaving={isSaving}
           onCancel={closeModal}
           onChange={updateField}
           onSubmit={saveExpense}
-          vendors={vendors}
+          vendors={formVendors}
         />
       )}
     </div>
@@ -326,6 +359,7 @@ export default function Expenses({ data, expensesData }: ExpensesProps) {
 function ExpenseModal({
   editing,
   errors,
+  events,
   form,
   isSaving,
   onCancel,
@@ -335,6 +369,7 @@ function ExpenseModal({
 }: {
   editing: boolean;
   errors: ExpenseFormErrors;
+  events: EventOSData["events"];
   form: ExpenseForm;
   isSaving: boolean;
   onCancel: () => void;
@@ -356,6 +391,12 @@ function ExpenseModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Event">
+            <select className="dashboard-input" onChange={(event) => onChange("eventId", event.target.value)} value={form.eventId}>
+              <option value="">Workspace-wide / Unassigned</option>
+              {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+            </select>
+          </Field>
           <Field error={errors.category} label="Category">
             <select className="dashboard-input" onChange={(event) => onChange("category", event.target.value)} value={form.category}>
               {EXPENSE_CATEGORY_OPTIONS.map((category) => <option key={category} value={category}>{category}</option>)}
@@ -376,7 +417,7 @@ function ExpenseModal({
               <option value="Pending">Pending</option>
             </select>
           </Field>
-          <Field label="Vendor">
+          <Field error={errors.vendorId} label="Vendor">
             <select className="dashboard-input" onChange={(event) => onChange("vendorId", event.target.value)} value={form.vendorId}>
               <option value={directExpenseValue}>Direct Expense</option>
               {vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
@@ -461,7 +502,7 @@ function getLargestExpense(expenses: ManagedExpense[]) {
   }, null);
 }
 
-function validateExpenseForm(form: ExpenseForm) {
+function validateExpenseForm(form: ExpenseForm, vendors: Vendor[]) {
   const errors: ExpenseFormErrors = {};
   const amount = Number(form.amount);
 
@@ -473,6 +514,12 @@ function validateExpenseForm(form: ExpenseForm) {
   if (!form.amount.trim()) errors.amount = "Amount is required.";
   if (form.amount.trim() && (Number.isNaN(amount) || amount <= 0)) errors.amount = "Amount must be greater than 0.";
   if (!form.date.trim()) errors.date = "Date is required.";
+  if (form.vendorId !== directExpenseValue) {
+    const vendor = vendors.find((item) => item.id === form.vendorId);
+    if (!vendor || !isVendorAvailableForEvent(vendor, form.eventId)) {
+      errors.vendorId = "Select a vendor linked to this event, a workspace-wide vendor, or Direct Expense.";
+    }
+  }
 
   return errors;
 }
@@ -483,22 +530,20 @@ function makeExpensePayload(form: ExpenseForm): Omit<ManagedExpense, "id"> {
     category: resolveExpenseCategory(form.category, form.customCategory),
     date: form.date,
     description: form.description.trim(),
+    eventId: form.eventId || undefined,
     notes: form.notes.trim(),
     paymentStatus: form.paymentStatus,
     vendorId: form.vendorId === directExpenseValue ? undefined : form.vendorId,
   };
 }
 
-function expenseToWriteInput(
-  expense: Omit<ManagedExpense, "id">,
-  existingExpense?: ManagedExpense,
-): ExpenseWriteInput {
+function expenseToWriteInput(expense: Omit<ManagedExpense, "id">): ExpenseWriteInput {
   return {
     amount: expense.amount,
     category: expense.category,
     date: expense.date,
     description: expense.description,
-    eventId: existingExpense?.eventId,
+    eventId: expense.eventId,
     notes: expense.notes ?? "",
     paymentStatus: expense.paymentStatus ?? "Paid",
     vendorId: expense.vendorId,
@@ -518,11 +563,17 @@ function getVendorName(vendorId: string | undefined, vendors: Vendor[]) {
   return vendors.find((vendor) => vendor.id === vendorId)?.name ?? "Direct Expense";
 }
 
-function expenseMatchesSearch(expense: ManagedExpense, vendors: Vendor[], query: string) {
+function expenseMatchesSearch(
+  expense: ManagedExpense,
+  vendors: Vendor[],
+  events: EventOSData["events"],
+  query: string,
+) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
 
   return [
+    events.find((event) => event.id === expense.eventId)?.name ?? "Workspace-wide",
     expense.category,
     expense.description,
     getVendorName(expense.vendorId, vendors),
@@ -531,6 +582,11 @@ function expenseMatchesSearch(expense: ManagedExpense, vendors: Vendor[], query:
     expense.paymentStatus ?? "Paid",
     expense.notes ?? "",
   ].some((value) => value.toLowerCase().includes(normalizedQuery));
+}
+
+function isVendorAvailableForEvent(vendor: Vendor, eventId: string) {
+  if (!eventId) return !vendor.eventId;
+  return !vendor.eventId || vendor.eventId === eventId;
 }
 
 function readStoredExpenses() {
