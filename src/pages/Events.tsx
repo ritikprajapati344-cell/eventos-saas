@@ -2,6 +2,7 @@ import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useMemo, useState } from "react";
 import { CalendarPlus, Clock, Copy, Edit3, MoreVertical, MapPin, RotateCcw, Ticket, Trash2, Archive, Eye } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { EventPosterThumbnail } from "../components/EventPosterThumbnail";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
@@ -559,6 +560,10 @@ function EventMiniCard({
 
   return (
     <article className="relative rounded-lg border border-white/10 bg-slate-950/35 p-3 transition hover:border-app-primary/40 hover:bg-slate-900/70">
+      <Link className="mb-3 block focus:outline-none focus:ring-2 focus:ring-app-primary/45" to={`/events/${event.id}`}>
+        <EventPosterThumbnail event={event} size="card" />
+      </Link>
+
       <div className="flex flex-wrap items-start justify-between gap-3">
         <Link className="min-w-0 flex-1 focus:outline-none" to={`/events/${event.id}`}>
           <h3 className="line-clamp-2 break-words text-sm font-semibold leading-5 text-white">{event.name}</h3>

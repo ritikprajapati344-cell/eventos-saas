@@ -1,5 +1,6 @@
-import { CalendarDays, Globe2 } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import type { EventItem } from "../types";
+import { EventPosterThumbnail } from "./EventPosterThumbnail";
 
 interface EventContextChipProps {
   className?: string;
@@ -27,7 +28,7 @@ export function EventContextChip({ className = "", event }: EventContextChipProp
       className={`inline-flex max-w-full items-center gap-1.5 rounded-full border border-app-primary/25 bg-app-primary/12 px-2.5 py-1 text-[11px] font-medium text-blue-100 ${className}`}
       title={tooltip}
     >
-      <CalendarDays className="shrink-0 text-app-primary" size={12} />
+      <EventPosterThumbnail event={event} size="chip" />
       <span className="truncate">{event.name}</span>
     </span>
   );

@@ -305,7 +305,7 @@ export default function Dashboard({
         }
       />
 
-      <EventFilter events={data.events} onChange={setEventFilter} value={eventFilter} />
+      <EventFilter events={data.events} onChange={setEventFilter} showPoster value={eventFilter} />
 
       <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <KpiCard title="Active Events" value={formatNumber(activeEvents)} helper={`${scopedData.events.filter((event) => !event.archived).length} visible in ${scope.shortLabel}`} icon={CalendarDays} />

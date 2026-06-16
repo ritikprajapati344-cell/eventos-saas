@@ -37,6 +37,7 @@ import {
 } from "recharts";
 import { ChartCard } from "../components/ChartCard";
 import { axisStyle, chartPalette, gridStyle } from "../components/charts/ChartTheme";
+import { EventPosterThumbnail } from "../components/EventPosterThumbnail";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
@@ -60,6 +61,7 @@ import type {
   ContractStatus,
   EventFile,
   EventOSData,
+  EventStatus,
   PaymentStatus,
   SponsorStatus,
   TaskPriority,
@@ -538,6 +540,25 @@ export default function EventDetail({
           </Link>
         }
       />
+
+      <section className="glass-panel flex min-w-0 flex-col gap-4 rounded-lg p-3 sm:flex-row sm:items-center sm:p-4">
+        <EventPosterThumbnail event={event} size="header" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge label={event.status} tone={getEventStatusTone(event.status)} />
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-300">
+              {event.eventType}
+            </span>
+          </div>
+          <h2 className="mt-3 break-words text-lg font-semibold text-white">{event.name}</h2>
+          <div className="mt-2 grid gap-2 text-sm text-app-muted sm:grid-cols-2 xl:grid-cols-4">
+            <span className="break-words">{event.venue}, {event.city}</span>
+            <span>{new Date(event.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} at {event.eventTime}</span>
+            <span>Capacity {formatNumber(event.capacity)}</span>
+            <span className="break-words">Main artist {event.mainArtist || "TBC"}</span>
+          </div>
+        </div>
+      </section>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <EventKpi title="Revenue" value={formatCurrency(scoped.actualRevenue)} helper="Actual ticket + sponsor" icon={BadgeIndianRupee} tone="success" />
@@ -1150,6 +1171,17 @@ function getTicketStatus(sold: number, inventory: number): CheckInStatus {
   if (sold <= 0) return "Not Started";
   if (sold >= inventory) return "Sold Out";
   return "Active";
+}
+
+function getEventStatusTone(status: EventStatus) {
+  const tones: Record<EventStatus, "blue" | "green" | "amber" | "red" | "slate"> = {
+    Cancelled: "red",
+    Completed: "slate",
+    Ongoing: "green",
+    Planning: "blue",
+    Upcoming: "amber",
+  };
+  return tones[status];
 }
 
 function makeChartLabel(name: string) {

@@ -1,5 +1,6 @@
 import { CalendarRange } from "lucide-react";
 import type { EventItem } from "../types";
+import { EventPosterThumbnail } from "./EventPosterThumbnail";
 
 export const ALL_EVENTS_FILTER = "all";
 export const UNASSIGNED_EVENTS_FILTER = "unassigned";
@@ -7,21 +8,27 @@ export const UNASSIGNED_EVENTS_FILTER = "unassigned";
 interface EventFilterProps {
   events: EventItem[];
   onChange: (value: string) => void;
+  showPoster?: boolean;
   value: string;
 }
 
-export function EventFilter({ events, onChange, value }: EventFilterProps) {
+export function EventFilter({ events, onChange, showPoster = false, value }: EventFilterProps) {
   const sortedEvents = [...events].sort((left, right) => {
     if (left.archived !== right.archived) return Number(left.archived) - Number(right.archived);
     return left.date.localeCompare(right.date) || left.name.localeCompare(right.name);
   });
+  const selectedEvent = events.find((event) => event.id === value);
 
   return (
     <div className="glass-panel flex min-w-0 flex-col gap-3 rounded-lg p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-app-primary/25 bg-app-primary/12 text-blue-200">
-          <CalendarRange size={17} />
-        </div>
+        {showPoster && selectedEvent ? (
+          <EventPosterThumbnail event={selectedEvent} size="filter" />
+        ) : (
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-app-primary/25 bg-app-primary/12 text-blue-200">
+            <CalendarRange size={17} />
+          </div>
+        )}
         <div className="min-w-0">
           <p className="text-sm font-medium text-white">Event context</p>
           <p className="mt-0.5 text-xs text-app-muted">Filter this workspace view by linked event.</p>
