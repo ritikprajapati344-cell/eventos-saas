@@ -21,8 +21,8 @@ export function AppLayout({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const workspaceLabel = isSupabaseMode
-    ? workspaceName?.trim() || "Supabase Workspace"
-    : "Local Workspace";
+    ? workspaceName?.trim() || "Cloud Workspace"
+    : workspaceName?.trim() || "Local Workspace";
 
   useEffect(() => {
     const enforceDarkTheme = () => applyThemeSettings({});

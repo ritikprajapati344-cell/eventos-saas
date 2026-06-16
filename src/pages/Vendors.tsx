@@ -17,7 +17,7 @@ interface VendorsProps {
   vendorsData: VendorsDataSource;
 }
 
-type VendorPaymentStatus = Vendor["status"] | "Partial";
+type VendorPaymentStatus = Vendor["status"];
 
 type VendorForm = {
   advancePaid: string;
@@ -560,7 +560,11 @@ function validateVendorForm(form: VendorForm) {
 function makeVendorPayload(form: VendorForm): Omit<Vendor, "id"> {
   const amount = Number(form.amount);
   const advancePaid = Number(form.advancePaid || 0);
-  const normalizedStatus: Vendor["status"] = form.status === "Paid" || advancePaid >= amount ? "Paid" : "Pending";
+  const normalizedStatus: Vendor["status"] = form.status === "Paid" || advancePaid >= amount
+    ? "Paid"
+    : form.status === "Partial" || advancePaid > 0
+      ? "Partial"
+      : "Pending";
   const category = form.category === "Custom" ? form.customCategory.trim() : form.category;
 
   return {

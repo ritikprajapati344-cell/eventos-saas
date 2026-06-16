@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
 import { useActivitiesData } from "./hooks/useActivitiesData";
@@ -28,6 +29,8 @@ import Sponsors from "./pages/Sponsors";
 import Ticketing from "./pages/Ticketing";
 import Vendors from "./pages/Vendors";
 
+const localSettingsStorageKey = "eventos-settings-v1";
+
 export default function App() {
   return (
     <AuthGate fallback={<Login />} loadingFallback={<AuthLoadingScreen />}>
@@ -38,6 +41,7 @@ export default function App() {
 
 function AuthenticatedApp() {
   const { user, workspaceId } = useAuth();
+  const [localWorkspaceName, setLocalWorkspaceName] = useState(() => readLocalWorkspaceName());
   const { data: localData, setData } = useEventOSData();
   const activitiesData = useActivitiesData(workspaceId);
   const eventFilesData = useEventFilesData(workspaceId, user?.id ?? null);
@@ -73,12 +77,29 @@ function AuthenticatedApp() {
         revenueForecast: eventsData.isSupabaseMode ? [] : localData.revenueForecast,
       }
     : localData;
+  const isSupabaseMode = settingsData.isSupabaseMode;
+  const workspaceDisplayName = useMemo(
+    () => (
+      isSupabaseMode
+        ? settingsData.settings?.companyName?.trim()
+        : localWorkspaceName
+    ) || undefined,
+    [isSupabaseMode, localWorkspaceName, settingsData.settings?.companyName],
+  );
+
+  useEffect(() => {
+    const refreshLocalWorkspaceName = () => setLocalWorkspaceName(readLocalWorkspaceName());
+
+    refreshLocalWorkspaceName();
+    window.addEventListener("eventos:settings-theme-updated", refreshLocalWorkspaceName);
+    return () => window.removeEventListener("eventos:settings-theme-updated", refreshLocalWorkspaceName);
+  }, []);
 
   return (
     <AppLayout
       data={data}
-      isSupabaseMode={settingsData.isSupabaseMode}
-      workspaceName={settingsData.settings?.companyName}
+      isSupabaseMode={isSupabaseMode}
+      workspaceName={workspaceDisplayName}
     >
       <Routes>
         <Route
@@ -91,6 +112,7 @@ function AuthenticatedApp() {
               isFinanceLoading={financeData.isLoading}
               isSupabaseMode={eventsData.isSupabaseMode}
               setData={setData}
+              workspaceName={workspaceDisplayName}
             />
           )}
         />
@@ -126,6 +148,17 @@ function AuthenticatedApp() {
       </Routes>
     </AppLayout>
   );
+}
+
+function readLocalWorkspaceName() {
+  try {
+    const savedSettings = localStorage.getItem(localSettingsStorageKey);
+    if (!savedSettings) return "";
+    const parsed = JSON.parse(savedSettings) as { companyName?: unknown };
+    return typeof parsed.companyName === "string" ? parsed.companyName.trim() : "";
+  } catch {
+    return "";
+  }
 }
 
 function AuthLoadingScreen() {

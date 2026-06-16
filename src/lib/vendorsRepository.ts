@@ -1,7 +1,7 @@
 import type { Vendor, VendorCategory } from "../types";
 import { supabase } from "./supabase";
 
-export type VendorPaymentStatus = Vendor["status"] | "Partial";
+export type VendorPaymentStatus = Vendor["status"];
 
 export interface VendorWriteInput {
   advancePaid: number;
@@ -105,7 +105,7 @@ function mapVendorRow(row: VendorRow): Vendor {
     id: row.id,
     name: row.name,
     owner: row.owner,
-    status: row.payment_status === "Paid" ? "Paid" : "Pending",
+    status: row.payment_status,
   };
 }
 

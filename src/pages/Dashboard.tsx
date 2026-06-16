@@ -75,6 +75,7 @@ interface DashboardProps {
   isFinanceLoading: boolean;
   isSupabaseMode: boolean;
   setData: Dispatch<SetStateAction<EventOSData>>;
+  workspaceName?: string;
 }
 
 type QuickAction = "event" | "sponsor" | "artist" | "vendor" | "expense";
@@ -166,6 +167,7 @@ export default function Dashboard({
   isFinanceLoading,
   isSupabaseMode,
   setData,
+  workspaceName,
 }: DashboardProps) {
   const [activeAction, setActiveAction] = useState<QuickAction | null>(null);
   const [eventFilter, setEventFilter] = useState(ALL_EVENTS_FILTER);
@@ -298,7 +300,7 @@ export default function Dashboard({
         description="Clean operating dashboard for events, sponsors, tickets, tasks and financial visibility."
         action={
           <div className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300 md:block">
-            {isSupabaseMode ? "Supabase Workspace" : "Local Workspace"}
+            {workspaceName?.trim() || (isSupabaseMode ? "Cloud Workspace" : "Local Workspace")}
           </div>
         }
       />

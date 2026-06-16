@@ -231,14 +231,14 @@ export default function Finance({ data, financeData }: FinanceProps) {
       />
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Revenue" value={formatCurrency(totalRevenue)} helper="Ticket + sponsor + ledger" icon={BadgeIndianRupee} tone="success" />
-        <KpiCard title="Expenses" value={formatCurrency(expenses)} helper="App expenses + ledger" icon={WalletCards} tone="warning" />
+        <KpiCard title="Revenue" value={formatCurrency(totalRevenue)} helper="Module revenue + ledger income" icon={BadgeIndianRupee} tone="success" />
+        <KpiCard title="Expenses" value={formatCurrency(expenses)} helper="Expense records + ledger expense" icon={WalletCards} tone="warning" />
         <KpiCard title="Profit" value={formatCurrency(profit)} helper="Revenue - expenses" icon={TrendingUp} tone={profit >= 0 ? "success" : "danger"} />
         <KpiCard title="Profit Margin" value={`${profitMargin.toFixed(1)}%`} helper="Net profit / revenue" icon={Percent} tone={profit >= 0 ? "success" : "danger"} />
         <KpiCard title="Sponsor Revenue" value={formatCurrency(sponsorRevenue)} helper="Closed won sponsors" icon={ReceiptIndianRupee} />
         <KpiCard title="Ticket Revenue" value={formatCurrency(ticketRevenue)} helper="All ticket categories" icon={CircleDollarSign} tone="primary" />
-        <KpiCard title="Ledger Income" value={formatCurrency(ledgerTotals.income)} helper="Manual finance entries" icon={Landmark} tone="success" />
-        <KpiCard title="Ledger Expense" value={formatCurrency(ledgerTotals.expense)} helper="Manual finance entries" icon={WalletCards} tone="warning" />
+        <KpiCard title="Ledger Income" value={formatCurrency(ledgerTotals.income)} helper="Manual recorded income" icon={Landmark} tone="success" />
+        <KpiCard title="Ledger Expense" value={formatCurrency(ledgerTotals.expense)} helper="Manual recorded expense" icon={WalletCards} tone="warning" />
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -248,6 +248,10 @@ export default function Finance({ data, financeData }: FinanceProps) {
       </section>
 
       <EventFilter events={data.events} onChange={setEventFilter} value={eventFilter} />
+
+      <div className="rounded-lg border border-app-primary/25 bg-app-primary/10 px-4 py-3 text-sm leading-6 text-blue-100">
+        Finance totals combine module records with manual ledger entries. Record Finance Income only for payments that are not already represented by ticket or sponsor revenue to avoid double counting.
+      </div>
 
       {visibleActionError && (
         <div className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-4 py-3 text-sm text-red-100">

@@ -88,7 +88,7 @@ export interface Vendor {
   category: VendorCategory;
   amount: number;
   advancePaid?: number;
-  status: "Pending" | "Paid";
+  status: "Pending" | "Partial" | "Paid";
   dueDate: string;
   owner: string;
 }

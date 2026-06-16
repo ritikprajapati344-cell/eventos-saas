@@ -7,7 +7,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useFinanceData } from "../hooks/useFinanceData";
 import type { FinanceTransactionRecord } from "../lib/financeTransactionsRepository";
 import type { EventOSData, Expense, Sponsor } from "../types";
-import { formatCurrency, formatNumber, getSponsorRevenue, getTotalExpenses, getTotalRevenue } from "../utils/finance";
+import { formatCurrency, formatNumber, getTotalExpenses, getTotalRevenue } from "../utils/finance";
 
 interface ReportsProps {
   data: EventOSData;
@@ -95,6 +95,10 @@ export default function Reports({ data }: ReportsProps) {
         )}
       </section>
 
+      <div className="rounded-lg border border-app-primary/25 bg-app-primary/10 px-4 py-3 text-sm leading-6 text-blue-100">
+        Reports include module revenue and expenses plus Finance ledger entries. Enter a payment in the ledger only when it is not already counted by tickets, sponsors, or expense records.
+      </div>
+
       {isFinanceUnavailable && (
         <div className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-4 py-3 text-sm text-amber-100">
           Finance transactions could not be loaded. Other report data remains available, and no local finance fallback was used.
@@ -138,8 +142,8 @@ export default function Reports({ data }: ReportsProps) {
       <section className="glass-panel rounded-lg p-5">
         <h2 className="text-base font-semibold text-white">Profit Formula</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <FormulaTile label="Total Revenue" value={formatCurrency(financials.revenue)} helper={`Includes ${formatCurrency(getSponsorRevenue(scopedData.sponsors))} sponsor revenue and recorded income`} />
-          <FormulaTile label="Total Expenses" value={formatCurrency(financials.expenses)} helper="Expense records plus recorded finance expenses" />
+          <FormulaTile label="Total Revenue" value={formatCurrency(financials.revenue)} helper={`Ticket and sponsor module revenue plus ${formatCurrency(getFinanceIncome(scopedTransactions))} recorded ledger income`} />
+          <FormulaTile label="Total Expenses" value={formatCurrency(financials.expenses)} helper="Expense records plus recorded ledger expenses" />
           <FormulaTile label="Net Profit" value={formatCurrency(financials.profit)} helper={`Revenue minus expenses for ${scope.label}`} />
         </div>
       </section>
@@ -455,12 +459,8 @@ function getReportScope(data: EventOSData, filter: string): ReportScope {
 }
 
 function getReportFinancials(data: EventOSData, transactions: FinanceTransactionRecord[]) {
-  const recordedIncome = transactions
-    .filter((transaction) => transaction.type === "Income")
-    .reduce((total, transaction) => total + transaction.amount, 0);
-  const recordedExpenses = transactions
-    .filter((transaction) => transaction.type === "Expense")
-    .reduce((total, transaction) => total + transaction.amount, 0);
+  const recordedIncome = getFinanceIncome(transactions);
+  const recordedExpenses = getFinanceExpenses(transactions);
   const revenue = getTotalRevenue(data.events, data.sponsors, data.ticketCategories) + recordedIncome;
   const expenses = getTotalExpenses(data.expenses) + recordedExpenses;
 
@@ -469,6 +469,18 @@ function getReportFinancials(data: EventOSData, transactions: FinanceTransaction
     profit: revenue - expenses,
     revenue,
   };
+}
+
+function getFinanceIncome(transactions: FinanceTransactionRecord[]) {
+  return transactions
+    .filter((transaction) => transaction.type === "Income")
+    .reduce((total, transaction) => total + transaction.amount, 0);
+}
+
+function getFinanceExpenses(transactions: FinanceTransactionRecord[]) {
+  return transactions
+    .filter((transaction) => transaction.type === "Expense")
+    .reduce((total, transaction) => total + transaction.amount, 0);
 }
 
 function getProfitMargin(revenue: number, profit: number) {

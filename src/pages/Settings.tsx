@@ -169,7 +169,7 @@ export default function Settings({ settingsData }: SettingsProps) {
             <Field label="Contact Number" onChange={(value) => updateSetting("contactNumber", value)} value={settings.contactNumber} />
             <Field label="Email Address" onChange={(value) => updateSetting("emailAddress", value)} type="email" value={settings.emailAddress} />
             <Field label="Workspace Region" onChange={(value) => updateSetting("workspaceRegion", value)} value={settings.workspaceRegion} />
-            <Field label="Default Currency" onChange={(value) => updateSetting("defaultCurrency", value)} value={settings.defaultCurrency} />
+            <V2Setting label="Default Currency" description={`${settings.defaultCurrency || "INR"} is used for EventOS V1. Multi-currency settings are planned for V2.`} />
           </div>
         </div>
 
@@ -182,20 +182,20 @@ export default function Settings({ settingsData }: SettingsProps) {
           </SettingsPanel>
 
           <SettingsPanel icon={Bell} title="Notifications">
-            <Toggle checked={settings.sponsorFollowUps} label="Sponsor follow-ups" onChange={(checked) => updateSetting("sponsorFollowUps", checked)} />
-            <Toggle checked={settings.paymentReminders} label="Payment reminders" onChange={(checked) => updateSetting("paymentReminders", checked)} />
-            <Toggle checked={settings.dailyDigest} label="Daily event digest" onChange={(checked) => updateSetting("dailyDigest", checked)} />
+            <V2Setting label="Sponsor follow-ups" description="Automated notification delivery is coming in V2." />
+            <V2Setting label="Payment reminders" description="Reminder scheduling is coming in V2." />
+            <V2Setting label="Daily event digest" description="Email digest controls are coming in V2." />
           </SettingsPanel>
 
           <SettingsPanel icon={UserRound} title="User Preferences">
-            <Field label="Name" onChange={(value) => updateSetting("organizerName", value)} value={settings.organizerName} />
-            <Field label="Role" onChange={(value) => updateSetting("role", value)} value={settings.role} />
+            <V2Setting label="Personal profile" description={`${settings.organizerName || "Organizer"} is saved under Company Information for V1.`} />
+            <V2Setting label="Role-based permissions" description={`${settings.role || "Organizer"} access controls are planned for V2.`} />
           </SettingsPanel>
 
           <SettingsPanel icon={SlidersHorizontal} title="Workspace Controls">
-            <Toggle checked={settings.localStorageMode} label="Local workspace storage" onChange={(checked) => updateSetting("localStorageMode", checked)} />
-            <Toggle checked={settings.exportButtons} label="Export buttons enabled" onChange={(checked) => updateSetting("exportButtons", checked)} />
-            <Toggle checked={settings.profitUpdates} label="Auto profit updates" onChange={(checked) => updateSetting("profitUpdates", checked)} />
+            <V2Setting label="Storage mode switch" description="Workspace data mode is managed by deployment configuration in V1." />
+            <V2Setting label="Export visibility" description="Report export controls are enabled from the Reports module in V1." />
+            <V2Setting label="Financial automation" description="Profit calculations update automatically from saved records." />
           </SettingsPanel>
 
           <SettingsPanel icon={Download} title="Workspace Backup">
@@ -255,12 +255,17 @@ function Field({ label, onChange, type = "text", value }: { label: string; onCha
   );
 }
 
-function Toggle({ label, checked = false, onChange }: { label: string; checked?: boolean; onChange: (checked: boolean) => void }) {
+function V2Setting({ description, label }: { description: string; label: string }) {
   return (
-    <label className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-sm text-slate-200">
-      <span>{label}</span>
-      <input className="h-5 w-5 accent-app-primary" checked={checked} onChange={(event) => onChange(event.target.checked)} type="checkbox" />
-    </label>
+    <div className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium text-slate-200">{label}</p>
+        <span className="shrink-0 rounded-full border border-app-primary/25 bg-app-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-100">
+          V2
+        </span>
+      </div>
+      <p className="mt-2 text-sm leading-5 text-app-muted">{description}</p>
+    </div>
   );
 }
 
