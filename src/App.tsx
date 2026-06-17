@@ -16,6 +16,7 @@ import { useTasksData } from "./hooks/useTasksData";
 import { useTicketingData } from "./hooks/useTicketingData";
 import { useTimelineData } from "./hooks/useTimelineData";
 import { useVendorsData } from "./hooks/useVendorsData";
+import AICenter from "./pages/AICenter";
 import Artists from "./pages/Artists";
 import Dashboard from "./pages/Dashboard";
 import EventDetail from "./pages/EventDetail";
@@ -116,6 +117,7 @@ function AuthenticatedApp() {
             />
           )}
         />
+        <Route path="/ai-center" element={<AICenter />} />
         <Route path="/events" element={<Events activitiesData={activitiesData} data={data} eventFilesData={eventFilesData} eventsData={eventsData} setData={setData} />} />
         <Route
           path="/events/:eventId"

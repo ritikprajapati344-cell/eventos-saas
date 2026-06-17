@@ -10,6 +10,7 @@ import {
   ReceiptIndianRupee,
   Settings,
   ShieldCheck,
+  Sparkles,
   Ticket,
   Tickets,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import type { EventItem, EventOSData } from "../types";
 
 const navigation = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
+  { label: "AI Center ✨", path: "/ai-center", icon: Sparkles },
   { label: "Events", path: "/events", icon: CalendarDays },
   { label: "Sponsors", path: "/sponsors", icon: BriefcaseBusiness },
   { label: "Artists", path: "/artists", icon: Mic2 },
