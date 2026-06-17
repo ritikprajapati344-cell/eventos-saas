@@ -10,17 +10,21 @@ export interface AIEventPlan {
   capacity: number;
   eventName: string;
   revenueForecast: number;
+  risks: string[];
   suggestedSponsors: string[];
   suggestedTasks: string[];
   ticketCategories: AIPlanTicketCategory[];
   venue: string;
 }
 
+export type AICenterBackendMode = "gemini" | "gemini-fallback" | "missing-secret" | "mock-backend";
+
 export interface AIEventPlanResponse {
   message: string;
-  mode: "mock-backend";
+  mode: AICenterBackendMode;
   ok: true;
   plan: AIEventPlan;
+  warning?: string;
 }
 
 export async function generateAIEventPlan(prompt: string) {
@@ -37,5 +41,11 @@ export async function generateAIEventPlan(prompt: string) {
     throw new Error("AI Center returned an invalid response.");
   }
 
-  return data;
+  return {
+    ...data,
+    plan: {
+      ...data.plan,
+      risks: Array.isArray(data.plan.risks) ? data.plan.risks : [],
+    },
+  };
 }

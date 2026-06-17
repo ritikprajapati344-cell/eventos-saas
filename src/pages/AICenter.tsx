@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, MapPin, Sparkles, Ticket, TrendingUp } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
-import { generateAIEventPlan, type AIEventPlan } from "../lib/aiCenterClient";
+import { generateAIEventPlan, type AICenterBackendMode, type AIEventPlan } from "../lib/aiCenterClient";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 const mockPlan = {
@@ -23,9 +23,11 @@ const mockPlan = {
     { name: "Student Pass", price: 999, inventory: 180 },
   ],
   venue: "Premium indoor auditorium",
+  risks: ["Venue hold may expire before confirmation", "Sponsor decisions can take longer than ticket launch timelines", "Premium ticket demand needs strong artist positioning"],
 };
 
 export default function AICenter() {
+  const [backendMode, setBackendMode] = useState<AICenterBackendMode | "frontend-fallback">("frontend-fallback");
   const [backendMessage, setBackendMessage] = useState("");
   const [fallbackMessage, setFallbackMessage] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -41,9 +43,12 @@ export default function AICenter() {
     try {
       const response = await generateAIEventPlan(prompt.trim() || "Create a premium EventOS event plan.");
       setPlan(response.plan);
+      setBackendMode(response.mode);
       setBackendMessage(response.message);
+      setFallbackMessage(response.warning ?? "");
     } catch {
       setPlan(mockPlan);
+      setBackendMode("frontend-fallback");
       setFallbackMessage("AI Center backend is not reachable locally yet. Showing the built-in mock preview.");
     } finally {
       setHasPreview(true);
@@ -67,7 +72,7 @@ export default function AICenter() {
             <div className="min-w-0">
               <h2 className="text-lg font-semibold text-white">Event Planning Prompt</h2>
             <p className="mt-1 text-sm leading-6 text-app-muted">
-                Describe the event concept, audience, city, budget, artist, or sponsor goals. This sprint uses a mock AI backend only.
+                Describe the event concept, audience, city, budget, artist, or sponsor goals. Gemini runs only inside the Supabase Edge Function.
               </p>
             </div>
           </div>
@@ -84,7 +89,7 @@ export default function AICenter() {
 
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-app-muted">
-              This sprint calls a mock Supabase Edge Function when available. No external AI API request is made.
+              This sprint calls the Supabase Edge Function when available. If Gemini is unavailable, EventOS keeps a safe read-only fallback.
             </p>
             <button
               className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
@@ -117,7 +122,7 @@ export default function AICenter() {
               <h2 className="mt-1 text-xl font-semibold text-white">Generated Event Plan</h2>
             </div>
             <span className="inline-flex self-start rounded-full border border-app-primary/30 bg-app-primary/10 px-3 py-1 text-xs font-medium text-blue-100 sm:self-auto">
-              {backendMessage ? "Mock backend" : "Fallback mock"}
+              {getModeLabel(backendMode)}
             </span>
           </div>
 
@@ -138,6 +143,7 @@ export default function AICenter() {
             <PreviewTile icon={TrendingUp} label="Revenue Forecast" value={`${formatCurrency(plan.revenueForecast)} projected gross revenue`} />
             <PreviewList title="Suggested Sponsors" items={plan.suggestedSponsors} />
             <PreviewList title="Suggested Tasks" items={plan.suggestedTasks} />
+            <PreviewList title="Risks" items={plan.risks} />
           </div>
         </section>
       )}
@@ -211,4 +217,15 @@ function PreviewList({ items, title }: { items: string[]; title: string }) {
 
 function formatTicketCategory(category: AIEventPlan["ticketCategories"][number]) {
   return `${category.name} - ${formatCurrency(category.price)} - ${formatNumber(category.inventory)} inventory`;
+}
+
+function getModeLabel(mode: AICenterBackendMode | "frontend-fallback") {
+  const labels: Record<AICenterBackendMode | "frontend-fallback", string> = {
+    "frontend-fallback": "Frontend fallback",
+    "gemini": "Gemini",
+    "gemini-fallback": "Gemini fallback",
+    "missing-secret": "Missing secret",
+    "mock-backend": "Mock backend",
+  };
+  return labels[mode];
 }
