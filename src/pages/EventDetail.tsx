@@ -92,6 +92,7 @@ interface EventDetailProps {
 }
 
 type FormGroup = keyof typeof initialForms;
+type CopilotTone = "danger" | "primary" | "success" | "warning";
 
 const sponsorStages: SponsorStatus[] = ["Lead", "Contacted", "Proposal Sent", "Negotiation", "Closed Won", "Closed Lost"];
 const ticketPresets = ["Sofa", "Gold", "Silver", "Custom"];
@@ -568,6 +569,8 @@ export default function EventDetail({
         <EventKpi title="Sponsor Revenue" value={formatCurrency(scoped.sponsorRevenue)} helper="Payment received deals" icon={BriefcaseBusiness} />
       </section>
 
+      <AICopilotPanel event={event} scoped={scoped} />
+
       {visibleError && <p className="rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">{visibleError}</p>}
       {activityWarning && <p className="rounded-lg border border-app-warning/30 bg-app-warning/10 px-3 py-2 text-sm text-amber-100">{activityWarning}</p>}
 
@@ -986,6 +989,95 @@ function EventKpi({ title, value, helper, icon: Icon, tone = "primary" }: { titl
         </div>
       </div>
       <p className="mt-3 text-xs text-slate-400">{helper}</p>
+    </article>
+  );
+}
+
+function AICopilotPanel({
+  event,
+  scoped,
+}: {
+  event: EventOSData["events"][number];
+  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>;
+}) {
+  const insights = getCopilotInsights(event, scoped);
+
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI Event Copilot</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Event operating guidance</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Read-only recommendations from current EventOS data. No records are created from this panel.
+          </p>
+        </div>
+        <div className="rounded-lg border border-app-primary/25 bg-app-primary/10 px-4 py-3 text-center">
+          <p className="text-xs uppercase tracking-[0.12em] text-blue-100">Event Health Score</p>
+          <p className={`mt-1 text-3xl font-semibold ${insights.healthScore >= 75 ? "text-green-200" : insights.healthScore >= 45 ? "text-amber-200" : "text-red-200"}`}>
+            {insights.healthScore}
+          </p>
+          <p className="text-xs text-app-muted">out of 100</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <CopilotMetricCard helper={insights.revenue.helper} icon={TrendingUp} title="Revenue Opportunity" tone={insights.revenue.tone} value={insights.revenue.value} />
+        <CopilotMetricCard helper={insights.ticket.helper} icon={Ticket} title="Ticket Health" tone={insights.ticket.tone} value={insights.ticket.value} />
+        <CopilotMetricCard helper={insights.task.helper} icon={ListChecks} title="Task Risk" tone={insights.task.tone} value={insights.task.value} />
+        <CopilotMetricCard helper={insights.sponsor.helper} icon={BriefcaseBusiness} title="Sponsor Opportunity" tone={insights.sponsor.tone} value={insights.sponsor.value} />
+      </div>
+
+      <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="text-blue-200" size={18} />
+          <p className="text-sm font-semibold text-white">AI Recommendations</p>
+        </div>
+        <ul className="mt-3 grid gap-2 md:grid-cols-2">
+          {insights.recommendations.map((recommendation) => (
+            <li key={recommendation} className="flex gap-2 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-primary" />
+              <span className="min-w-0 break-words">{recommendation}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+function CopilotMetricCard({
+  helper,
+  icon: Icon,
+  title,
+  tone,
+  value,
+}: {
+  helper: string;
+  icon: typeof Ticket;
+  title: string;
+  tone: CopilotTone;
+  value: string;
+}) {
+  const tones = {
+    primary: "border-app-primary/30 bg-app-primary/14 text-blue-200",
+    success: "border-app-success/30 bg-app-success/14 text-green-200",
+    warning: "border-app-warning/30 bg-app-warning/14 text-amber-200",
+    danger: "border-app-danger/30 bg-app-danger/14 text-red-200",
+  };
+
+  return (
+    <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="flex items-start gap-3">
+        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border ${tones[tone]}`}>
+          <Icon size={18} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{title}</p>
+          <p className="mt-2 break-words text-base font-semibold text-white">{value}</p>
+          <p className="mt-1 text-sm leading-5 text-app-muted">{helper}</p>
+        </div>
+      </div>
     </article>
   );
 }
@@ -1626,6 +1718,139 @@ function calculateEventWorkspace(data: EventOSData, eventId: string) {
     sponsorChart,
     profitTrend,
   };
+}
+
+function getCopilotInsights(
+  event: EventOSData["events"][number],
+  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>,
+) {
+  const ticketInventory = scoped.tickets.reduce((sum, ticket) => sum + ticket.inventory, 0);
+  const ticketSellThrough = ticketInventory > 0 ? scoped.totalTicketsSold / ticketInventory : 0;
+  const revenueProgress = scoped.expectedRevenue > 0 ? scoped.actualRevenue / scoped.expectedRevenue : 0;
+  const completedTasks = scoped.tasks.filter((task) => task.status === "Done").length;
+  const taskCompletion = scoped.tasks.length > 0 ? completedTasks / scoped.tasks.length : 0.5;
+  const openHighPriorityTasks = scoped.tasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
+  const activeSponsorCount = scoped.sponsors.filter((sponsor) => !["Closed Lost", "Closed Won"].includes(sponsor.status)).length;
+  const wonSponsorCount = scoped.sponsors.filter((sponsor) => sponsor.status === "Closed Won").length;
+  const sponsorScore = scoped.sponsors.length > 0 ? wonSponsorCount / scoped.sponsors.length : 0.35;
+  const healthScore = clampScore(
+    Math.round((revenueProgress * 35) + (ticketSellThrough * 25) + (taskCompletion * 20) + (sponsorScore * 20)),
+  );
+  const revenueGap = Math.max(scoped.expectedRevenue - scoped.actualRevenue, 0);
+  const unsoldTickets = Math.max(ticketInventory - scoped.totalTicketsSold, 0);
+  const recommendations = buildCopilotRecommendations({
+    activeSponsorCount,
+    event,
+    openHighPriorityTasks,
+    revenueGap,
+    revenueProgress,
+    scoped,
+    taskCompletion,
+    ticketInventory,
+    ticketSellThrough,
+    unsoldTickets,
+  });
+
+  return {
+    healthScore,
+    recommendations,
+    revenue: {
+      helper: revenueGap > 0
+        ? `${formatCurrency(revenueGap)} gap against expected revenue.`
+        : "Actual revenue has reached or exceeded expectation.",
+      tone: getCopilotTone(revenueProgress >= 0.75 ? "success" : revenueProgress >= 0.35 ? "warning" : "danger"),
+      value: `${Math.min(100, Math.round(revenueProgress * 100))}% recorded`,
+    },
+    sponsor: {
+      helper: scoped.sponsors.length === 0
+        ? "No sponsor pipeline attached to this event yet."
+        : `${formatNumber(activeSponsorCount)} active deals, ${formatNumber(wonSponsorCount)} closed won.`,
+      tone: getCopilotTone(wonSponsorCount > 0 ? "success" : activeSponsorCount > 0 ? "warning" : "danger"),
+      value: `${formatCurrency(scoped.sponsorRevenue)} received`,
+    },
+    task: {
+      helper: scoped.tasks.length === 0
+        ? "No event tasks are tracked yet."
+        : `${formatNumber(openHighPriorityTasks)} high-priority tasks still open.`,
+      tone: getCopilotTone(openHighPriorityTasks === 0 && taskCompletion >= 0.7 ? "success" : openHighPriorityTasks <= 2 ? "warning" : "danger"),
+      value: `${Math.round(taskCompletion * 100)}% complete`,
+    },
+    ticket: {
+      helper: ticketInventory === 0
+        ? "No ticket inventory has been configured."
+        : `${formatNumber(unsoldTickets)} tickets remain available.`,
+      tone: getCopilotTone(ticketInventory === 0 ? "danger" : ticketSellThrough >= 0.65 ? "success" : ticketSellThrough >= 0.25 ? "warning" : "danger"),
+      value: `${Math.round(ticketSellThrough * 100)}% sold`,
+    },
+  };
+}
+
+function buildCopilotRecommendations({
+  activeSponsorCount,
+  event,
+  openHighPriorityTasks,
+  revenueGap,
+  revenueProgress,
+  scoped,
+  taskCompletion,
+  ticketInventory,
+  ticketSellThrough,
+  unsoldTickets,
+}: {
+  activeSponsorCount: number;
+  event: EventOSData["events"][number];
+  openHighPriorityTasks: number;
+  revenueGap: number;
+  revenueProgress: number;
+  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>;
+  taskCompletion: number;
+  ticketInventory: number;
+  ticketSellThrough: number;
+  unsoldTickets: number;
+}) {
+  const recommendations: string[] = [];
+
+  if (ticketInventory === 0) {
+    recommendations.push("Set up ticket categories so EventOS can track sales health for this event.");
+  } else if (ticketSellThrough < 0.25) {
+    recommendations.push(`Ticket sales are early. Push campaign focus toward the ${formatNumber(unsoldTickets)} remaining seats.`);
+  } else if (ticketSellThrough > 0.8) {
+    recommendations.push("Ticket demand is strong. Consider premium upsells, add-ons, or capacity expansion if the venue allows it.");
+  }
+
+  if (revenueProgress < 0.5 && revenueGap > 0) {
+    recommendations.push(`Prioritize revenue actions worth at least ${formatCurrency(revenueGap)} to close the expected revenue gap.`);
+  } else {
+    recommendations.push("Revenue is tracking well against the current event plan. Keep monitoring payment collection.");
+  }
+
+  if (scoped.sponsors.length === 0) {
+    recommendations.push("Add sponsor leads for this event to improve non-ticket revenue visibility.");
+  } else if (activeSponsorCount > 0 && scoped.sponsorRevenue === 0) {
+    recommendations.push("Move active sponsor conversations toward proposal and payment milestones.");
+  }
+
+  if (scoped.tasks.length === 0) {
+    recommendations.push("Create a task checklist for production, marketing, sponsor follow-up and show-day operations.");
+  } else if (openHighPriorityTasks > 0) {
+    recommendations.push(`Resolve ${formatNumber(openHighPriorityTasks)} high-priority task ${openHighPriorityTasks === 1 ? "blocker" : "blockers"} before the next planning review.`);
+  } else if (taskCompletion < 0.6) {
+    recommendations.push("Task completion is still building. Review owners and due dates with the event team.");
+  }
+
+  if (event.status === "Planning" && new Date(event.date).getTime() - Date.now() < 14 * 24 * 60 * 60 * 1000) {
+    recommendations.push("The event date is close while status is still Planning. Confirm operations readiness and update status if needed.");
+  }
+
+  return recommendations.slice(0, 6);
+}
+
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function getCopilotTone(tone: CopilotTone) {
+  return tone;
 }
 
 function getArtistTotal(artist: { fee: number; travelCost: number; hotelCost: number; greenRoomCost?: number }) {
