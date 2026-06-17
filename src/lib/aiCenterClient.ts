@@ -17,7 +17,14 @@ export interface AIEventPlan {
   venue: string;
 }
 
-export type AICenterBackendMode = "gemini" | "gemini-fallback" | "missing-secret" | "mock-backend";
+export type AICenterBackendMode =
+  | "fallback"
+  | "gemini"
+  | "gemini-backup"
+  | "gemini-fallback"
+  | "groq"
+  | "missing-secret"
+  | "mock-backend";
 
 export interface AIEventPlanResponse {
   message: string;

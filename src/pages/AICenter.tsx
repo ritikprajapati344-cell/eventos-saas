@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, MapPin, RefreshCw, Sparkles, Ticket, TrendingUp } from "lucide-react";
+import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, FilePlus2, MapPin, RefreshCw, ShieldAlert, Sparkles, Ticket, TrendingUp } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { generateAIEventPlan, type AICenterBackendMode, type AIEventPlan } from "../lib/aiCenterClient";
 import { formatCurrency, formatNumber } from "../utils/finance";
@@ -35,12 +35,14 @@ export default function AICenter() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [plan, setPlan] = useState<AIEventPlan>(mockPlan);
   const [planActionMessage, setPlanActionMessage] = useState("");
+  const [showDraftPreview, setShowDraftPreview] = useState(false);
 
   const generatePreview = async () => {
     setIsGenerating(true);
     setBackendMessage("");
     setFallbackMessage("");
     setPlanActionMessage("");
+    setShowDraftPreview(false);
 
     try {
       const response = await generateAIEventPlan(prompt.trim() || "Create a premium EventOS event plan.");
@@ -179,6 +181,14 @@ export default function AICenter() {
                   <RefreshCw className={isGenerating ? "animate-spin" : ""} size={16} />
                   {isGenerating ? "Regenerating..." : "Regenerate Plan"}
                 </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-app-primary/35 bg-app-primary/15 px-3 text-sm font-medium text-blue-100 transition hover:border-app-primary/60 hover:bg-app-primary/20 focus:outline-none focus:ring-2 focus:ring-app-primary/35"
+                  onClick={() => setShowDraftPreview(true)}
+                  type="button"
+                >
+                  <FilePlus2 size={16} />
+                  Create Draft Event
+                </button>
               </div>
             </div>
           </div>
@@ -209,6 +219,10 @@ export default function AICenter() {
             <PreviewList title="Risks" items={plan.risks} />
           </div>
         </section>
+      )}
+
+      {hasPreview && showDraftPreview && (
+        <DraftEventPreview plan={plan} prompt={prompt} />
       )}
     </div>
   );
@@ -278,6 +292,86 @@ function PreviewList({ items, title }: { items: string[]; title: string }) {
   );
 }
 
+function DraftEventPreview({ plan, prompt }: { plan: AIEventPlan; prompt: string }) {
+  const eventType = deriveEventType(plan, prompt);
+  const city = deriveCity(plan, prompt);
+  const projectedTotal = plan.ticketCategories.reduce((sum, category) => sum + category.price * category.inventory, 0);
+
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI draft event preview</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">AI Draft Event Preview</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Review how this AI plan would map into EventOS. This is a read-only preview and does not create any records.
+          </p>
+        </div>
+        <button
+          className="inline-flex min-h-11 cursor-not-allowed flex-col items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-400 opacity-75"
+          disabled
+          type="button"
+        >
+          <span>Approve & Create Event</span>
+          <span className="text-xs font-normal text-app-muted">Coming in Sprint 9</span>
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-4">
+        <PreviewTile icon={Sparkles} label="Event Name" value={plan.eventName} />
+        <PreviewTile icon={MapPin} label="Venue" value={plan.venue} />
+        <PreviewTile icon={Ticket} label="Capacity" value={`${formatNumber(plan.capacity)} guests`} />
+        <PreviewTile icon={CalendarCheck2} label="Event Type" value={eventType} />
+        <PreviewTile icon={MapPin} label="City" value={city} />
+        <PreviewTile icon={TrendingUp} label="Ticket Potential" value={`${formatCurrency(projectedTotal)} if fully sold`} />
+      </div>
+
+      <div className="mt-5 overflow-hidden rounded-lg border border-white/10 bg-white/[0.035]">
+        <div className="border-b border-white/10 px-4 py-3">
+          <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Ticket Draft Table</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-[680px] w-full text-left text-sm">
+            <thead className="bg-white/[0.035] text-xs uppercase tracking-[0.1em] text-app-muted">
+              <tr>
+                <th className="px-4 py-3 font-medium">Category</th>
+                <th className="px-4 py-3 font-medium">Price</th>
+                <th className="px-4 py-3 font-medium">Inventory</th>
+                <th className="px-4 py-3 font-medium">Projected Revenue</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10 text-slate-200">
+              {plan.ticketCategories.map((category) => (
+                <tr key={`${category.name}-${category.price}-${category.inventory}`}>
+                  <td className="px-4 py-3 font-medium text-white">{category.name}</td>
+                  <td className="px-4 py-3">{formatCurrency(category.price)}</td>
+                  <td className="px-4 py-3">{formatNumber(category.inventory)}</td>
+                  <td className="px-4 py-3">{formatCurrency(category.price * category.inventory)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <PreviewList title="Sponsor Suggestions" items={plan.suggestedSponsors} />
+        <PreviewList title="Task Checklist" items={plan.suggestedTasks} />
+        <PreviewList title="Risks" items={plan.risks} />
+      </div>
+
+      <div className="mt-5 rounded-lg border border-app-warning/25 bg-app-warning/10 p-4 text-sm leading-6 text-amber-100">
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="mt-0.5 shrink-0" size={18} />
+          <p>
+            Preview only. Event creation, ticket setup, sponsor records, and task creation remain locked until Sprint 9 approval flow.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function formatTicketCategory(category: AIEventPlan["ticketCategories"][number]) {
   return `${category.name} - ${formatCurrency(category.price)} - ${formatNumber(category.inventory)} inventory`;
 }
@@ -309,11 +403,49 @@ function formatPlanForExport(plan: AIEventPlan) {
 
 function getModeLabel(mode: AICenterBackendMode | "frontend-fallback") {
   const labels: Record<AICenterBackendMode | "frontend-fallback", string> = {
+    "fallback": "Safe fallback",
     "frontend-fallback": "Frontend fallback",
     "gemini": "Gemini",
+    "gemini-backup": "Gemini backup",
     "gemini-fallback": "Gemini fallback",
+    "groq": "Groq",
     "missing-secret": "Missing secret",
     "mock-backend": "Mock backend",
   };
   return labels[mode];
+}
+
+function deriveEventType(plan: AIEventPlan, prompt: string) {
+  const text = `${plan.eventName} ${plan.venue} ${prompt}`.toLowerCase();
+  const eventTypes = [
+    { label: "Comedy Show", terms: ["comedy", "comedian", "stand-up", "standup"] },
+    { label: "Concert", terms: ["concert", "music", "singer", "band", "dj"] },
+    { label: "Corporate Event", terms: ["corporate", "conference", "summit", "offsite"] },
+    { label: "College Fest", terms: ["college", "campus", "student", "fest"] },
+    { label: "Conference", terms: ["conference", "seminar", "expo", "workshop"] },
+    { label: "Live Event", terms: ["live", "show", "gala", "festival"] },
+  ];
+
+  return eventTypes.find((type) => type.terms.some((term) => text.includes(term)))?.label ?? "Live Event";
+}
+
+function deriveCity(plan: AIEventPlan, prompt: string) {
+  const text = `${plan.eventName} ${plan.venue} ${prompt}`.toLowerCase();
+  const cities = [
+    "Ahmedabad",
+    "Bengaluru",
+    "Chennai",
+    "Delhi",
+    "Gandhidham",
+    "Hyderabad",
+    "Jaipur",
+    "Kolkata",
+    "Mumbai",
+    "Pune",
+    "Rajkot",
+    "Surat",
+    "Vadodara",
+  ];
+
+  return cities.find((city) => text.includes(city.toLowerCase())) ?? "Not specified";
 }
