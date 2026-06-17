@@ -569,6 +569,11 @@ function EventMiniCard({
           <h3 className="line-clamp-2 break-words text-sm font-semibold leading-5 text-white">{event.name}</h3>
         </Link>
         <div className="flex shrink-0 items-center gap-2">
+          {isAICreatedEvent(event) && (
+            <span className="inline-flex items-center rounded-full border border-app-primary/30 bg-app-primary/10 px-2 py-1 text-[11px] font-medium text-blue-100">
+              ✨ AI Created
+            </span>
+          )}
           <StatusBadge label={isArchived ? "Archived" : event.status} tone={isArchived ? "slate" : eventTone[event.status]} />
           <button className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]" onClick={onToggleMenu} type="button">
             <MoreVertical size={16} />
@@ -747,6 +752,10 @@ function eventToWriteInput(event: EventItem): EventWriteInput {
     status: event.status,
     venue: event.venue,
   };
+}
+
+function isAICreatedEvent(event: EventItem) {
+  return event.notes.toLowerCase().includes("created from ai center");
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

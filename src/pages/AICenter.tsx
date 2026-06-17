@@ -2,6 +2,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, FilePlus2, MapPin, RefreshCw, ShieldAlert, Sparkles, Ticket, TrendingUp, X } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
+import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
@@ -32,6 +33,7 @@ const mockPlan = {
 } satisfies AIEventPlan;
 
 interface AICenterProps {
+  activitiesData: ActivitiesDataSource;
   data: EventOSData;
   eventsData: EventsDataSource;
   setData: Dispatch<SetStateAction<EventOSData>>;
@@ -40,6 +42,7 @@ interface AICenterProps {
 }
 
 export default function AICenter({
+  activitiesData,
   data,
   eventsData,
   setData,
@@ -59,6 +62,7 @@ export default function AICenter({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [createSummary, setCreateSummary] = useState("");
   const [toast, setToast] = useState("");
   const [createdDraftSignature, setCreatedDraftSignature] = useState("");
 
@@ -75,6 +79,7 @@ export default function AICenter({
     setShowDraftPreview(false);
     setCreateError("");
     setCreatedDraftSignature("");
+    setCreateSummary("");
 
     try {
       const response = await generateAIEventPlan(prompt.trim() || "Create a premium EventOS event plan.");
@@ -120,18 +125,21 @@ export default function AICenter({
 
   const openCreateModal = () => {
     setCreateError("");
+    setCreateSummary("");
     setShowCreateModal(true);
   };
 
   const cancelCreate = () => {
     if (isCreatingDraft) return;
     setCreateError("");
+    setCreateSummary("");
     setShowCreateModal(false);
   };
 
   const approveAndCreateEvent = async () => {
     const draft = buildDraftEvent(plan, prompt);
     const signature = createDraftSignature(draft.event, plan);
+    const provider = getProviderLabel(backendMode);
 
     if (isCreatingDraft) return;
     if (createdDraftSignature === signature || hasMatchingDraftEvent(data.events, draft.event)) {
@@ -168,8 +176,17 @@ export default function AICenter({
           });
         }
 
+        await recordAICreationActivity(activitiesData, setData, {
+          eventId: createdEvent.id,
+          eventName: createdEvent.name,
+          provider,
+          taskCount: draft.tasks.length,
+          ticketCount: draft.tickets.length,
+        });
+
         setCreatedDraftSignature(signature);
         setShowCreateModal(false);
+        setCreateSummary(buildSuccessSummary(1, draft.tickets.length, draft.tasks.length));
         showToast("AI draft event created successfully.");
         navigate(`/events/${createdEvent.id}`);
         return;
@@ -185,9 +202,17 @@ export default function AICenter({
         tasks: [...tasks, ...current.tasks],
         ticketCategories: [...tickets, ...current.ticketCategories],
       }));
+      await recordAICreationActivity(activitiesData, setData, {
+        eventId: createdEvent.id,
+        eventName: createdEvent.name,
+        provider,
+        taskCount: tasks.length,
+        ticketCount: tickets.length,
+      });
 
       setCreatedDraftSignature(signature);
       setShowCreateModal(false);
+      setCreateSummary(buildSuccessSummary(1, tickets.length, tasks.length));
       showToast("AI draft event created successfully.");
       navigate(`/events/${createdEvent.id}`);
     } catch (error) {
@@ -338,6 +363,7 @@ export default function AICenter({
       {hasPreview && showDraftPreview && (
         <DraftEventPreview
           createError={createError}
+          createSummary={createSummary}
           isCreating={isCreatingDraft}
           onOpenCreateModal={openCreateModal}
           plan={plan}
@@ -430,12 +456,14 @@ function PreviewList({ items, title }: { items: string[]; title: string }) {
 
 function DraftEventPreview({
   createError,
+  createSummary,
   isCreating,
   onOpenCreateModal,
   plan,
   prompt,
 }: {
   createError: string;
+  createSummary: string;
   isCreating: boolean;
   onOpenCreateModal: () => void;
   plan: AIEventPlan;
@@ -472,6 +500,12 @@ function DraftEventPreview({
       {createError && (
         <p className="mt-4 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 py-2 text-sm text-red-100">
           {createError}
+        </p>
+      )}
+
+      {createSummary && (
+        <p className="mt-4 rounded-lg border border-app-success/30 bg-app-success/10 px-3 py-2 text-sm text-green-100">
+          {createSummary}
         </p>
       )}
 
@@ -810,6 +844,79 @@ function toEventType(value: string): EventType {
     "Custom",
   ];
   return allowedTypes.includes(value as EventType) ? value as EventType : "Custom";
+}
+
+async function recordAICreationActivity(
+  activitiesData: ActivitiesDataSource,
+  setData: Dispatch<SetStateAction<EventOSData>>,
+  details: {
+    eventId: string;
+    eventName: string;
+    provider: string;
+    taskCount: number;
+    ticketCount: number;
+  },
+) {
+  const message = buildActivityMessage(
+    details.eventName,
+    details.provider,
+    details.ticketCount,
+    details.taskCount,
+  );
+  const activity = {
+    entity: "AI Center",
+    entityId: details.eventId,
+    eventId: details.eventId,
+    message,
+    metadata: {
+      action: "ai-created",
+      provider: details.provider,
+      source: "ai-center",
+      taskCount: details.taskCount,
+      ticketCategoryCount: details.ticketCount,
+    },
+    type: "Event" as const,
+  };
+
+  if (activitiesData.isSupabaseMode) {
+    try {
+      await activitiesData.createActivity(activity);
+    } catch (error) {
+      throw new Error(`Event was created, but activity logging failed: ${getErrorMessage(error, "Unable to save activity.")}`);
+    }
+    return;
+  }
+
+  setData((current) => ({
+    ...current,
+    activities: [{
+      ...activity,
+      id: `activity-${Date.now()}`,
+      time: "Just now",
+    }, ...current.activities],
+  }));
+}
+
+function buildActivityMessage(eventName: string, provider: string, ticketCount: number, taskCount: number) {
+  return `AI Center created event ${eventName} using ${provider} (${ticketCount} ticket categories, ${taskCount} tasks)`;
+}
+
+function buildSuccessSummary(eventCount: number, ticketCount: number, taskCount: number) {
+  return `Created ${eventCount} event, ${ticketCount} ticket categories, and ${taskCount} tasks.`;
+}
+
+function getProviderLabel(mode: AICenterBackendMode | "frontend-fallback") {
+  const labels: Record<AICenterBackendMode | "frontend-fallback", string> = {
+    "fallback": "Safe fallback",
+    "frontend-fallback": "Frontend fallback",
+    "gemini": "Gemini",
+    "gemini-backup": "Gemini backup",
+    "gemini-fallback": "Gemini fallback",
+    "groq": "Groq",
+    "missing-secret": "Missing secret",
+    "mock-backend": "Mock backend",
+  };
+  return labels[mode];
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

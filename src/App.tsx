@@ -121,6 +121,7 @@ function AuthenticatedApp() {
           path="/ai-center"
           element={(
             <AICenter
+              activitiesData={activitiesData}
               data={data}
               eventsData={eventsData}
               setData={setData}
