@@ -1,6 +1,6 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, FilePlus2, MapPin, RefreshCw, ShieldAlert, Sparkles, Ticket, TrendingUp, X } from "lucide-react";
+import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, FilePlus2, MapPin, Plus, RefreshCw, ShieldAlert, Sparkles, Ticket, Trash2, TrendingUp, X } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
@@ -41,6 +41,29 @@ interface AICenterProps {
   ticketingData: TicketingDataSource;
 }
 
+interface EditableDraftTicket {
+  id: string;
+  inventory: string;
+  name: string;
+  price: string;
+}
+
+interface EditableDraftTask {
+  id: string;
+  title: string;
+}
+
+interface EditableDraft {
+  capacity: string;
+  city: string;
+  eventName: string;
+  eventType: EventType;
+  expectedRevenue: string;
+  tasks: EditableDraftTask[];
+  tickets: EditableDraftTicket[];
+  venue: string;
+}
+
 export default function AICenter({
   activitiesData,
   data,
@@ -63,6 +86,7 @@ export default function AICenter({
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createSummary, setCreateSummary] = useState("");
+  const [draft, setDraft] = useState<EditableDraft | null>(null);
   const [toast, setToast] = useState("");
   const [createdDraftSignature, setCreatedDraftSignature] = useState("");
 
@@ -80,6 +104,7 @@ export default function AICenter({
     setCreateError("");
     setCreatedDraftSignature("");
     setCreateSummary("");
+    setDraft(null);
 
     try {
       const response = await generateAIEventPlan(prompt.trim() || "Create a premium EventOS event plan.");
@@ -124,6 +149,13 @@ export default function AICenter({
   };
 
   const openCreateModal = () => {
+    if (!draft) return;
+    const validation = validateEditableDraft(draft);
+    if (!validation.isValid) {
+      setCreateError(validation.errors[0]);
+      return;
+    }
+
     setCreateError("");
     setCreateSummary("");
     setShowCreateModal(true);
@@ -137,12 +169,23 @@ export default function AICenter({
   };
 
   const approveAndCreateEvent = async () => {
-    const draft = buildDraftEvent(plan, prompt);
-    const signature = createDraftSignature(draft.event, plan);
+    if (!draft) {
+      setCreateError("Create a draft preview before creating an event.");
+      return;
+    }
+
+    const validation = validateEditableDraft(draft);
+    if (!validation.isValid) {
+      setCreateError(validation.errors[0]);
+      return;
+    }
+
+    const records = buildDraftEvent(draft);
+    const signature = createDraftSignature(records.event, draft);
     const provider = getProviderLabel(backendMode);
 
     if (isCreatingDraft) return;
-    if (createdDraftSignature === signature || hasMatchingDraftEvent(data.events, draft.event)) {
+    if (createdDraftSignature === signature || hasMatchingDraftEvent(data.events, records.event)) {
       setCreateError("This AI draft already appears to be created. Open the existing event or regenerate a new plan.");
       return;
     }
@@ -152,9 +195,9 @@ export default function AICenter({
 
     try {
       if (eventsData.isSupabaseMode) {
-        const createdEvent = await eventsData.createEvent(toEventWriteInput(draft.event));
+        const createdEvent = await eventsData.createEvent(toEventWriteInput(records.event));
 
-        for (const ticket of draft.tickets) {
+        for (const ticket of records.tickets) {
           await ticketingData.createTicketCategory({
             checkedIn: ticket.checkedIn,
             eventId: createdEvent.id,
@@ -165,7 +208,7 @@ export default function AICenter({
           });
         }
 
-        for (const task of draft.tasks) {
+        for (const task of records.tasks) {
           await tasksData.createTask({
             dueDate: task.dueDate,
             eventId: createdEvent.id,
@@ -180,21 +223,21 @@ export default function AICenter({
           eventId: createdEvent.id,
           eventName: createdEvent.name,
           provider,
-          taskCount: draft.tasks.length,
-          ticketCount: draft.tickets.length,
+          taskCount: records.tasks.length,
+          ticketCount: records.tickets.length,
         });
 
         setCreatedDraftSignature(signature);
         setShowCreateModal(false);
-        setCreateSummary(buildSuccessSummary(1, draft.tickets.length, draft.tasks.length));
+        setCreateSummary(buildSuccessSummary(1, records.tickets.length, records.tasks.length));
         showToast("AI draft event created successfully.");
         navigate(`/events/${createdEvent.id}`);
         return;
       }
 
-      const createdEvent = draft.event;
-      const tickets = draft.tickets.map((ticket) => ({ ...ticket, eventId: createdEvent.id }));
-      const tasks = draft.tasks.map((task) => ({ ...task, eventId: createdEvent.id }));
+      const createdEvent = records.event;
+      const tickets = records.tickets.map((ticket) => ({ ...ticket, eventId: createdEvent.id }));
+      const tasks = records.tasks.map((task) => ({ ...task, eventId: createdEvent.id }));
 
       setData((current) => ({
         ...current,
@@ -321,6 +364,7 @@ export default function AICenter({
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-app-primary/35 bg-app-primary/15 px-3 text-sm font-medium text-blue-100 transition hover:border-app-primary/60 hover:bg-app-primary/20 focus:outline-none focus:ring-2 focus:ring-app-primary/35"
                   onClick={() => {
                     setCreateError("");
+                    setDraft(createEditableDraft(plan, prompt));
                     setShowDraftPreview(true);
                   }}
                   type="button"
@@ -364,10 +408,12 @@ export default function AICenter({
         <DraftEventPreview
           createError={createError}
           createSummary={createSummary}
+          draft={draft}
           isCreating={isCreatingDraft}
           onOpenCreateModal={openCreateModal}
-          plan={plan}
-          prompt={prompt}
+          onUpdateDraft={setDraft}
+          risks={plan.risks}
+          sponsorSuggestions={plan.suggestedSponsors}
         />
       )}
 
@@ -376,8 +422,7 @@ export default function AICenter({
           isCreating={isCreatingDraft}
           onCancel={cancelCreate}
           onConfirm={() => void approveAndCreateEvent()}
-          plan={plan}
-          prompt={prompt}
+          draft={draft}
         />
       )}
 
@@ -457,21 +502,65 @@ function PreviewList({ items, title }: { items: string[]; title: string }) {
 function DraftEventPreview({
   createError,
   createSummary,
+  draft,
   isCreating,
   onOpenCreateModal,
-  plan,
-  prompt,
+  onUpdateDraft,
+  risks,
+  sponsorSuggestions,
 }: {
   createError: string;
   createSummary: string;
+  draft: EditableDraft | null;
   isCreating: boolean;
   onOpenCreateModal: () => void;
-  plan: AIEventPlan;
-  prompt: string;
+  onUpdateDraft: Dispatch<SetStateAction<EditableDraft | null>>;
+  risks: string[];
+  sponsorSuggestions: string[];
 }) {
-  const eventType = deriveEventType(plan, prompt);
-  const city = deriveCity(plan, prompt);
-  const projectedTotal = plan.ticketCategories.reduce((sum, category) => sum + category.price * category.inventory, 0);
+  if (!draft) return null;
+
+  const validation = validateEditableDraft(draft);
+  const projectedTotal = getDraftTicketRevenue(draft);
+  const updateDraft = (nextDraft: EditableDraft) => onUpdateDraft(nextDraft);
+  const updateField = (field: keyof Omit<EditableDraft, "tasks" | "tickets">, value: string) => {
+    updateDraft({ ...draft, [field]: value });
+  };
+  const updateTicket = (ticketId: string, field: keyof Omit<EditableDraftTicket, "id">, value: string) => {
+    updateDraft({
+      ...draft,
+      tickets: draft.tickets.map((ticket) => (
+        ticket.id === ticketId ? { ...ticket, [field]: value } : ticket
+      )),
+    });
+  };
+  const addTicket = () => {
+    updateDraft({
+      ...draft,
+      tickets: [
+        ...draft.tickets,
+        { id: `draft-ticket-${Date.now()}`, inventory: "0", name: "New Category", price: "0" },
+      ],
+    });
+  };
+  const removeTicket = (ticketId: string) => {
+    updateDraft({ ...draft, tickets: draft.tickets.filter((ticket) => ticket.id !== ticketId) });
+  };
+  const updateTask = (taskId: string, title: string) => {
+    updateDraft({
+      ...draft,
+      tasks: draft.tasks.map((task) => (task.id === taskId ? { ...task, title } : task)),
+    });
+  };
+  const addTask = () => {
+    updateDraft({
+      ...draft,
+      tasks: [...draft.tasks, { id: `draft-task-${Date.now()}`, title: "New task" }],
+    });
+  };
+  const removeTask = (taskId: string) => {
+    updateDraft({ ...draft, tasks: draft.tasks.filter((task) => task.id !== taskId) });
+  };
 
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
@@ -480,13 +569,13 @@ function DraftEventPreview({
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI draft event preview</p>
           <h2 className="mt-1 text-xl font-semibold text-white">AI Draft Event Preview</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
-            Review how this AI plan would map into EventOS. This is a read-only preview and does not create any records.
+            Review and edit before creating. Nothing is saved until you confirm.
           </p>
         </div>
         <div className="flex flex-col gap-2 lg:items-end">
           <button
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 py-2 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isCreating}
+            disabled={isCreating || !validation.isValid}
             onClick={onOpenCreateModal}
             type="button"
           >
@@ -509,36 +598,102 @@ function DraftEventPreview({
         </p>
       )}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-4">
-        <PreviewTile icon={Sparkles} label="Event Name" value={plan.eventName} />
-        <PreviewTile icon={MapPin} label="Venue" value={plan.venue} />
-        <PreviewTile icon={Ticket} label="Capacity" value={`${formatNumber(plan.capacity)} guests`} />
-        <PreviewTile icon={CalendarCheck2} label="Event Type" value={eventType} />
-        <PreviewTile icon={MapPin} label="City" value={city} />
-        <PreviewTile icon={TrendingUp} label="Ticket Potential" value={`${formatCurrency(projectedTotal)} if fully sold`} />
+      {validation.errors.length > 0 && (
+        <div className="mt-4 rounded-lg border border-app-warning/30 bg-app-warning/10 px-3 py-2 text-sm text-amber-100">
+          <p className="font-medium">Please fix before creating:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {validation.errors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <DraftField label="Event Name" value={draft.eventName} onChange={(value) => updateField("eventName", value)} />
+        <DraftField label="Venue" value={draft.venue} onChange={(value) => updateField("venue", value)} />
+        <DraftField label="City" value={draft.city} onChange={(value) => updateField("city", value)} />
+        <DraftField label="Capacity" min="1" type="number" value={draft.capacity} onChange={(value) => updateField("capacity", value)} />
+        <DraftField label="Expected Revenue" min="0" type="number" value={draft.expectedRevenue} onChange={(value) => updateField("expectedRevenue", value)} />
+        <label className="block">
+          <span className="text-xs uppercase tracking-[0.12em] text-app-muted">Event Type</span>
+          <select
+            className="dashboard-input mt-2 h-11 w-full"
+            onChange={(event) => updateDraft({ ...draft, eventType: event.target.value as EventType })}
+            value={draft.eventType}
+          >
+            {eventTypeOptions.map((eventType) => (
+              <option key={eventType} value={eventType}>{eventType}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="mt-5 overflow-hidden rounded-lg border border-white/10 bg-white/[0.035]">
-        <div className="border-b border-white/10 px-4 py-3">
-          <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Ticket Draft Table</p>
+        <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Editable Ticket Draft Table</p>
+            <p className="mt-1 text-sm text-slate-200">Total projected ticket revenue: {formatCurrency(projectedTotal)}</p>
+          </div>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-100 transition hover:border-app-primary/40 hover:bg-app-primary/10"
+            onClick={addTicket}
+            type="button"
+          >
+            <Plus size={16} />
+            Add Ticket
+          </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[680px] w-full text-left text-sm">
+          <table className="min-w-[820px] w-full text-left text-sm">
             <thead className="bg-white/[0.035] text-xs uppercase tracking-[0.1em] text-app-muted">
               <tr>
                 <th className="px-4 py-3 font-medium">Category</th>
                 <th className="px-4 py-3 font-medium">Price</th>
                 <th className="px-4 py-3 font-medium">Inventory</th>
                 <th className="px-4 py-3 font-medium">Projected Revenue</th>
+                <th className="px-4 py-3 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10 text-slate-200">
-              {plan.ticketCategories.map((category) => (
-                <tr key={`${category.name}-${category.price}-${category.inventory}`}>
-                  <td className="px-4 py-3 font-medium text-white">{category.name}</td>
-                  <td className="px-4 py-3">{formatCurrency(category.price)}</td>
-                  <td className="px-4 py-3">{formatNumber(category.inventory)}</td>
-                  <td className="px-4 py-3">{formatCurrency(category.price * category.inventory)}</td>
+              {draft.tickets.map((ticket) => (
+                <tr key={ticket.id}>
+                  <td className="px-4 py-3">
+                    <input
+                      className="dashboard-input h-10 w-full"
+                      onChange={(event) => updateTicket(ticket.id, "name", event.target.value)}
+                      value={ticket.name}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      className="dashboard-input h-10 w-full"
+                      min="0"
+                      onChange={(event) => updateTicket(ticket.id, "price", event.target.value)}
+                      type="number"
+                      value={ticket.price}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      className="dashboard-input h-10 w-full"
+                      min="0"
+                      onChange={(event) => updateTicket(ticket.id, "inventory", event.target.value)}
+                      type="number"
+                      value={ticket.inventory}
+                    />
+                  </td>
+                  <td className="px-4 py-3 font-medium text-white">{formatCurrency(getTicketDraftRevenue(ticket))}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 text-xs font-medium text-red-100 transition hover:bg-app-danger/15"
+                      onClick={() => removeTicket(ticket.id)}
+                      type="button"
+                    >
+                      <Trash2 size={14} />
+                      Remove
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -547,16 +702,21 @@ function DraftEventPreview({
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <PreviewList title="Sponsor Suggestions" items={plan.suggestedSponsors} />
-        <PreviewList title="Task Checklist" items={plan.suggestedTasks} />
-        <PreviewList title="Risks" items={plan.risks} />
+        <PreviewList title="Sponsor Suggestions" items={sponsorSuggestions} />
+        <EditableTaskList
+          onAdd={addTask}
+          onRemove={removeTask}
+          onUpdate={updateTask}
+          tasks={draft.tasks}
+        />
+        <PreviewList title="Risks" items={risks} />
       </div>
 
       <div className="mt-5 rounded-lg border border-app-warning/25 bg-app-warning/10 p-4 text-sm leading-6 text-amber-100">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 shrink-0" size={18} />
           <p>
-            User approval is required before creation. Sprint 9 creates only the event, ticket categories, and task checklist. Sponsors remain suggestions.
+            User approval is required before creation. This creates only the edited event draft, ticket categories, and task checklist. Sponsors remain suggestions.
           </p>
         </div>
       </div>
@@ -565,19 +725,19 @@ function DraftEventPreview({
 }
 
 function ConfirmCreateModal({
+  draft,
   isCreating,
   onCancel,
   onConfirm,
-  plan,
-  prompt,
 }: {
+  draft: EditableDraft | null;
   isCreating: boolean;
   onCancel: () => void;
   onConfirm: () => void;
-  plan: AIEventPlan;
-  prompt: string;
 }) {
-  const draft = buildDraftEvent(plan, prompt);
+  if (!draft) return null;
+
+  const records = buildDraftEvent(draft);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm">
@@ -587,7 +747,7 @@ function ConfirmCreateModal({
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Confirm AI draft creation</p>
             <h2 className="mt-1 text-xl font-semibold text-white">Create this event in EventOS?</h2>
             <p className="mt-2 text-sm leading-6 text-app-muted">
-              EventOS will create one event, {formatNumber(plan.ticketCategories.length)} ticket categories, and {formatNumber(plan.suggestedTasks.length)} tasks.
+              EventOS will create one event, {formatNumber(draft.tickets.length)} ticket categories, and {formatNumber(draft.tasks.length)} tasks.
             </p>
           </div>
           <button
@@ -602,12 +762,12 @@ function ConfirmCreateModal({
 
         <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <SummaryItem label="Event" value={draft.event.name} />
-            <SummaryItem label="Venue" value={draft.event.venue} />
-            <SummaryItem label="City" value={draft.event.city || "Not specified"} />
-            <SummaryItem label="Type" value={draft.event.eventType} />
-            <SummaryItem label="Capacity" value={formatNumber(draft.event.capacity)} />
-            <SummaryItem label="Expected Revenue" value={formatCurrency(draft.event.expectedRevenue)} />
+            <SummaryItem label="Event" value={records.event.name} />
+            <SummaryItem label="Venue" value={records.event.venue} />
+            <SummaryItem label="City" value={records.event.city || "Not specified"} />
+            <SummaryItem label="Type" value={records.event.eventType} />
+            <SummaryItem label="Capacity" value={formatNumber(records.event.capacity)} />
+            <SummaryItem label="Expected Revenue" value={formatCurrency(records.event.expectedRevenue)} />
           </dl>
         </div>
 
@@ -645,6 +805,85 @@ function SummaryItem({ label, value }: { label: string; value: string }) {
       <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">{label}</dt>
       <dd className="mt-1 break-words font-medium text-white">{value}</dd>
     </div>
+  );
+}
+
+function DraftField({
+  label,
+  min,
+  onChange,
+  type = "text",
+  value,
+}: {
+  label: string;
+  min?: string;
+  onChange: (value: string) => void;
+  type?: "number" | "text";
+  value: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs uppercase tracking-[0.12em] text-app-muted">{label}</span>
+      <input
+        className="dashboard-input mt-2 h-11 w-full"
+        min={min}
+        onChange={(event) => onChange(event.target.value)}
+        type={type}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function EditableTaskList({
+  onAdd,
+  onRemove,
+  onUpdate,
+  tasks,
+}: {
+  onAdd: () => void;
+  onRemove: (taskId: string) => void;
+  onUpdate: (taskId: string, title: string) => void;
+  tasks: EditableDraftTask[];
+}) {
+  return (
+    <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Editable Task Checklist</p>
+        <button
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-slate-100 transition hover:border-app-primary/40 hover:bg-app-primary/10"
+          onClick={onAdd}
+          type="button"
+        >
+          <Plus size={14} />
+          Add
+        </button>
+      </div>
+      <div className="mt-3 space-y-2">
+        {tasks.map((task) => (
+          <div key={task.id} className="flex gap-2">
+            <input
+              className="dashboard-input h-10 min-w-0 flex-1"
+              onChange={(event) => onUpdate(task.id, event.target.value)}
+              value={task.title}
+            />
+            <button
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-app-danger/30 bg-app-danger/10 text-red-100 transition hover:bg-app-danger/15"
+              onClick={() => onRemove(task.id)}
+              title="Remove task"
+              type="button"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+        {tasks.length === 0 && (
+          <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-app-muted">
+            No tasks in this draft yet.
+          </p>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -691,6 +930,15 @@ function getModeLabel(mode: AICenterBackendMode | "frontend-fallback") {
   return labels[mode];
 }
 
+const eventTypeOptions: EventType[] = [
+  "Comedy Show",
+  "Concert",
+  "Corporate Event",
+  "College Fest",
+  "Conference",
+  "Custom",
+];
+
 function deriveEventType(plan: AIEventPlan, prompt: string) {
   const text = `${plan.eventName} ${plan.venue} ${prompt}`.toLowerCase();
   const eventTypes = [
@@ -699,10 +947,10 @@ function deriveEventType(plan: AIEventPlan, prompt: string) {
     { label: "Corporate Event", terms: ["corporate", "conference", "summit", "offsite"] },
     { label: "College Fest", terms: ["college", "campus", "student", "fest"] },
     { label: "Conference", terms: ["conference", "seminar", "expo", "workshop"] },
-    { label: "Live Event", terms: ["live", "show", "gala", "festival"] },
+    { label: "Custom", terms: ["live", "show", "gala", "festival"] },
   ];
 
-  return eventTypes.find((type) => type.terms.some((term) => text.includes(term)))?.label ?? "Live Event";
+  return eventTypes.find((type) => type.terms.some((term) => text.includes(term)))?.label ?? "Custom";
 }
 
 function deriveCity(plan: AIEventPlan, prompt: string) {
@@ -726,51 +974,72 @@ function deriveCity(plan: AIEventPlan, prompt: string) {
   return cities.find((city) => text.includes(city.toLowerCase())) ?? "Not specified";
 }
 
-function buildDraftEvent(plan: AIEventPlan, prompt: string) {
+function createEditableDraft(plan: AIEventPlan, prompt: string): EditableDraft {
+  const city = deriveCity(plan, prompt);
+  return {
+    capacity: String(Math.max(1, Math.round(plan.capacity))),
+    city: city === "Not specified" ? "" : city,
+    eventName: plan.eventName.trim() || "AI Draft Event",
+    eventType: toEventType(deriveEventType(plan, prompt)),
+    expectedRevenue: String(Math.max(0, Math.round(plan.revenueForecast || getProjectedTicketRevenue(plan)))),
+    tasks: plan.suggestedTasks.map((task, index) => ({
+      id: `draft-task-${Date.now()}-${index}`,
+      title: task.trim() || `AI task ${index + 1}`,
+    })),
+    tickets: plan.ticketCategories.map((category, index) => ({
+      id: `draft-ticket-${Date.now()}-${index}`,
+      inventory: String(Math.max(0, Math.round(category.inventory))),
+      name: category.name.trim() || `Category ${index + 1}`,
+      price: String(Math.max(0, Math.round(category.price))),
+    })),
+    venue: plan.venue.trim() || "Venue to be confirmed",
+  };
+}
+
+function buildDraftEvent(draft: EditableDraft) {
   const idSeed = Date.now();
   const eventId = `ai-event-${idSeed}`;
-  const city = deriveCity(plan, prompt);
   const event: EventItem = {
     archived: false,
-    capacity: Math.max(1, Math.round(plan.capacity)),
-    city: city === "Not specified" ? "" : city,
+    capacity: Math.max(1, Math.round(toDraftNumber(draft.capacity))),
+    city: draft.city.trim(),
     date: getDefaultEventDate(),
     eventTime: "19:00",
-    eventType: toEventType(deriveEventType(plan, prompt)),
+    eventType: draft.eventType,
     expectedExpense: 0,
-    expectedRevenue: Math.max(0, Math.round(plan.revenueForecast || getProjectedTicketRevenue(plan))),
+    expectedRevenue: Math.max(0, Math.round(toDraftNumber(draft.expectedRevenue))),
     files: [],
     id: eventId,
     mainArtist: "",
-    name: plan.eventName.trim() || "AI Draft Event",
+    name: draft.eventName.trim(),
     notes: "Created from AI Center draft preview.",
     owner: "AI Center",
     progress: 0,
     status: "Planning",
     ticketPrice: 0,
     ticketsSold: 0,
-    venue: plan.venue.trim() || "Venue to be confirmed",
+    venue: draft.venue.trim(),
   };
 
-  const tickets: TicketCategory[] = plan.ticketCategories.map((category, index) => ({
+  const tickets: TicketCategory[] = draft.tickets.map((category, index) => ({
     checkedIn: 0,
     eventId,
     id: `ai-ticket-${idSeed}-${index}`,
-    inventory: Math.max(1, Math.round(category.inventory)),
+    inventory: Math.max(0, Math.round(toDraftNumber(category.inventory))),
     name: category.name.trim() || `Category ${index + 1}`,
-    price: Math.max(0, Math.round(category.price)),
+    price: Math.max(0, Math.round(toDraftNumber(category.price))),
     sold: 0,
     status: "Not Started",
   }));
 
-  const tasks: Task[] = plan.suggestedTasks.map((task, index) => ({
+  const tasks: Task[] = draft.tasks.map((task, index) => ({
     dueDate: getTaskDueDate(index),
     eventId,
     id: `ai-task-${idSeed}-${index}`,
     owner: "AI Center",
     priority: index < 2 ? "High" : index < 5 ? "Medium" : "Low",
     status: "Open",
-    title: task.trim() || `AI task ${index + 1}`,
+    title: task.title.trim() || `AI task ${index + 1}`,
   }));
 
   return { event, tasks, tickets };
@@ -795,14 +1064,14 @@ function toEventWriteInput(event: EventItem) {
   };
 }
 
-function createDraftSignature(event: EventItem, plan: AIEventPlan) {
+function createDraftSignature(event: EventItem, draft: EditableDraft) {
   return [
     event.name,
     event.venue,
     event.city,
     event.capacity,
     event.eventType,
-    plan.ticketCategories.map((category) => `${category.name}:${category.price}:${category.inventory}`).join("|"),
+    draft.tickets.map((category) => `${category.name}:${category.price}:${category.inventory}`).join("|"),
   ].join("::").toLowerCase();
 }
 
@@ -820,6 +1089,40 @@ function normalizeText(value: string) {
 
 function getProjectedTicketRevenue(plan: AIEventPlan) {
   return plan.ticketCategories.reduce((sum, category) => sum + category.price * category.inventory, 0);
+}
+
+function getDraftTicketRevenue(draft: EditableDraft) {
+  return draft.tickets.reduce((sum, ticket) => sum + getTicketDraftRevenue(ticket), 0);
+}
+
+function getTicketDraftRevenue(ticket: EditableDraftTicket) {
+  return Math.max(0, toDraftNumber(ticket.price)) * Math.max(0, toDraftNumber(ticket.inventory));
+}
+
+function validateEditableDraft(draft: EditableDraft) {
+  const errors: string[] = [];
+
+  if (!draft.eventName.trim()) errors.push("Event name is required.");
+  if (!draft.venue.trim()) errors.push("Venue is required.");
+  if (toDraftNumber(draft.capacity) <= 0) errors.push("Capacity must be greater than 0.");
+  if (draft.tickets.length === 0) errors.push("At least one ticket category is required.");
+
+  draft.tickets.forEach((ticket, index) => {
+    const label = ticket.name.trim() || `Ticket category ${index + 1}`;
+    if (!ticket.name.trim()) errors.push(`Ticket category ${index + 1} name is required.`);
+    if (toDraftNumber(ticket.price) < 0) errors.push(`${label} price must be 0 or more.`);
+    if (toDraftNumber(ticket.inventory) < 0) errors.push(`${label} inventory must be 0 or more.`);
+  });
+
+  return {
+    errors,
+    isValid: errors.length === 0,
+  };
+}
+
+function toDraftNumber(value: string) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : -1;
 }
 
 function getDefaultEventDate() {
