@@ -1028,6 +1028,47 @@ function AICopilotPanel({
         <CopilotMetricCard helper={insights.sponsor.helper} icon={BriefcaseBusiness} title="Sponsor Opportunity" tone={insights.sponsor.tone} value={insights.sponsor.value} />
       </div>
 
+      <div className="mt-5 grid gap-3 xl:grid-cols-3">
+        <CopilotAdvisorCard icon={BadgeIndianRupee} title="Revenue Advisor" tone={insights.revenueAdvisor.tone}>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <CopilotAdvisorStat label="Expected" value={formatCurrency(insights.revenueAdvisor.expectedRevenue)} />
+            <CopilotAdvisorStat label="Recorded" value={formatCurrency(insights.revenueAdvisor.recordedRevenue)} />
+            <CopilotAdvisorStat label="Gap" tone={insights.revenueAdvisor.revenueGap > 0 ? "warning" : "success"} value={formatCurrency(insights.revenueAdvisor.revenueGap)} />
+            <CopilotAdvisorStat label="Potential Gain" tone="success" value={formatCurrency(insights.revenueAdvisor.potentialRevenueGain)} />
+          </div>
+          <p className="mt-3 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+            {insights.revenueAdvisor.suggestedAction}
+          </p>
+        </CopilotAdvisorCard>
+
+        <CopilotAdvisorCard icon={Ticket} title="Ticket Pricing Advisor" tone={insights.ticketPricingAdvisor.tone}>
+          <div className="grid gap-2">
+            <CopilotAdvisorStat label="Strong Category" value={insights.ticketPricingAdvisor.strongCategory} />
+            <CopilotAdvisorStat label="Weak Category" tone={insights.ticketPricingAdvisor.weakCategory === "None" ? "success" : "warning"} value={insights.ticketPricingAdvisor.weakCategory} />
+          </div>
+          <p className="mt-3 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+            {insights.ticketPricingAdvisor.suggestedAction}
+          </p>
+        </CopilotAdvisorCard>
+
+        <CopilotAdvisorCard icon={BriefcaseBusiness} title="Sponsor Advisor" tone={insights.sponsorAdvisor.tone}>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <CopilotAdvisorStat label="Received" value={formatCurrency(insights.sponsorAdvisor.receivedAmount)} />
+            <CopilotAdvisorStat label="Closed" value={formatCurrency(insights.sponsorAdvisor.closedAmount)} />
+            <CopilotAdvisorStat label="Sponsor Gap" tone={insights.sponsorAdvisor.sponsorGap > 0 ? "warning" : "success"} value={formatCurrency(insights.sponsorAdvisor.sponsorGap)} />
+            <CopilotAdvisorStat label="Opportunity" tone="success" value={formatCurrency(insights.sponsorAdvisor.opportunityValue)} />
+          </div>
+          <p className="mt-3 text-xs uppercase tracking-[0.12em] text-app-muted">Suggested categories</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {insights.sponsorAdvisor.suggestedCategories.map((category) => (
+              <span key={category} className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                {category}
+              </span>
+            ))}
+          </div>
+        </CopilotAdvisorCard>
+      </div>
+
       <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
         <div className="flex items-center gap-2">
           <ShieldCheck className="text-blue-200" size={18} />
@@ -1042,7 +1083,84 @@ function AICopilotPanel({
           ))}
         </ul>
       </div>
+
+      <div className="mt-5 rounded-lg border border-app-warning/20 bg-app-warning/8 p-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-white">Priority Action List</p>
+            <p className="text-xs text-app-muted">Read-only advisor. No records are created.</p>
+          </div>
+          <span className="w-fit rounded-full border border-app-warning/30 bg-app-warning/12 px-2.5 py-1 text-xs font-medium text-amber-100">
+            {insights.priorityActions.length} priorities
+          </span>
+        </div>
+        <ol className="mt-3 grid gap-2 md:grid-cols-2">
+          {insights.priorityActions.map((action, index) => (
+            <li key={action} className="flex gap-3 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-app-warning/30 bg-app-warning/10 text-xs font-semibold text-amber-100">
+                {index + 1}
+              </span>
+              <span className="min-w-0 break-words">{action}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
     </section>
+  );
+}
+
+function CopilotAdvisorCard({
+  children,
+  icon: Icon,
+  title,
+  tone,
+}: {
+  children: React.ReactNode;
+  icon: typeof Ticket;
+  title: string;
+  tone: CopilotTone;
+}) {
+  const tones = {
+    primary: "border-app-primary/30 bg-app-primary/12 text-blue-200",
+    success: "border-app-success/30 bg-app-success/12 text-green-200",
+    warning: "border-app-warning/30 bg-app-warning/12 text-amber-200",
+    danger: "border-app-danger/30 bg-app-danger/12 text-red-200",
+  };
+
+  return (
+    <article className="min-w-0 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="mb-3 flex items-center gap-3">
+        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border ${tones[tone]}`}>
+          <Icon size={18} />
+        </div>
+        <h3 className="min-w-0 break-words text-sm font-semibold text-white">{title}</h3>
+      </div>
+      {children}
+    </article>
+  );
+}
+
+function CopilotAdvisorStat({
+  label,
+  tone = "primary",
+  value,
+}: {
+  label: string;
+  tone?: CopilotTone;
+  value: string;
+}) {
+  const toneClass = {
+    danger: "text-red-200",
+    primary: "text-white",
+    success: "text-green-200",
+    warning: "text-amber-200",
+  }[tone];
+
+  return (
+    <div className="min-w-0 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2">
+      <p className="text-[11px] uppercase tracking-[0.1em] text-app-muted">{label}</p>
+      <p className={`mt-1 break-words text-sm font-semibold ${toneClass}`}>{value}</p>
+    </div>
   );
 }
 
@@ -1726,18 +1844,37 @@ function getCopilotInsights(
 ) {
   const ticketInventory = scoped.tickets.reduce((sum, ticket) => sum + ticket.inventory, 0);
   const ticketSellThrough = ticketInventory > 0 ? scoped.totalTicketsSold / ticketInventory : 0;
+  const unsoldTicketValue = scoped.tickets.reduce((sum, ticket) => sum + Math.max(ticket.inventory - ticket.sold, 0) * ticket.price, 0);
   const revenueProgress = scoped.expectedRevenue > 0 ? scoped.actualRevenue / scoped.expectedRevenue : 0;
   const completedTasks = scoped.tasks.filter((task) => task.status === "Done").length;
+  const incompleteTasks = scoped.tasks.length - completedTasks;
   const taskCompletion = scoped.tasks.length > 0 ? completedTasks / scoped.tasks.length : 0.5;
   const openHighPriorityTasks = scoped.tasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
   const activeSponsorCount = scoped.sponsors.filter((sponsor) => !["Closed Lost", "Closed Won"].includes(sponsor.status)).length;
   const wonSponsorCount = scoped.sponsors.filter((sponsor) => sponsor.status === "Closed Won").length;
+  const closedSponsorAmount = scoped.sponsors.filter((sponsor) => sponsor.status === "Closed Won").reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
+  const expectedSponsorAmount = scoped.sponsors.filter((sponsor) => sponsor.status !== "Closed Lost").reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
   const sponsorScore = scoped.sponsors.length > 0 ? wonSponsorCount / scoped.sponsors.length : 0.35;
   const healthScore = clampScore(
     Math.round((revenueProgress * 35) + (ticketSellThrough * 25) + (taskCompletion * 20) + (sponsorScore * 20)),
   );
   const revenueGap = Math.max(scoped.expectedRevenue - scoped.actualRevenue, 0);
   const unsoldTickets = Math.max(ticketInventory - scoped.totalTicketsSold, 0);
+  const sponsorGap = Math.max(expectedSponsorAmount - scoped.sponsorRevenue, 0);
+  const sponsorOpportunityValue = sponsorGap > 0 ? sponsorGap : Math.round(revenueGap * 0.25);
+  const potentialRevenueGain = Math.min(revenueGap, unsoldTicketValue + sponsorOpportunityValue);
+  const ticketPricingAdvisor = getTicketPricingAdvisor(scoped.tickets);
+  const sponsorCategories = getSponsorCategorySuggestions(event.eventType);
+  const priorityActions = buildPriorityActions({
+    activeSponsorCount,
+    incompleteTasks,
+    openHighPriorityTasks,
+    revenueGap,
+    scoped,
+    sponsorGap,
+    ticketPricingAction: ticketPricingAdvisor.suggestedAction,
+    unsoldTickets,
+  });
   const recommendations = buildCopilotRecommendations({
     activeSponsorCount,
     event,
@@ -1753,6 +1890,7 @@ function getCopilotInsights(
 
   return {
     healthScore,
+    priorityActions,
     recommendations,
     revenue: {
       helper: revenueGap > 0
@@ -1761,12 +1899,28 @@ function getCopilotInsights(
       tone: getCopilotTone(revenueProgress >= 0.75 ? "success" : revenueProgress >= 0.35 ? "warning" : "danger"),
       value: `${Math.min(100, Math.round(revenueProgress * 100))}% recorded`,
     },
+    revenueAdvisor: {
+      expectedRevenue: scoped.expectedRevenue,
+      potentialRevenueGain,
+      recordedRevenue: scoped.actualRevenue,
+      revenueGap,
+      suggestedAction: getRevenueAdvisorAction({ potentialRevenueGain, revenueGap, sponsorOpportunityValue, unsoldTicketValue }),
+      tone: getCopilotTone(revenueGap === 0 ? "success" : potentialRevenueGain > 0 ? "warning" : "danger"),
+    },
     sponsor: {
       helper: scoped.sponsors.length === 0
         ? "No sponsor pipeline attached to this event yet."
         : `${formatNumber(activeSponsorCount)} active deals, ${formatNumber(wonSponsorCount)} closed won.`,
       tone: getCopilotTone(wonSponsorCount > 0 ? "success" : activeSponsorCount > 0 ? "warning" : "danger"),
       value: `${formatCurrency(scoped.sponsorRevenue)} received`,
+    },
+    sponsorAdvisor: {
+      closedAmount: closedSponsorAmount,
+      opportunityValue: sponsorOpportunityValue,
+      receivedAmount: scoped.sponsorRevenue,
+      sponsorGap,
+      suggestedCategories: sponsorCategories,
+      tone: getCopilotTone(sponsorGap === 0 && scoped.sponsorRevenue > 0 ? "success" : activeSponsorCount > 0 ? "warning" : "danger"),
     },
     task: {
       helper: scoped.tasks.length === 0
@@ -1782,7 +1936,133 @@ function getCopilotInsights(
       tone: getCopilotTone(ticketInventory === 0 ? "danger" : ticketSellThrough >= 0.65 ? "success" : ticketSellThrough >= 0.25 ? "warning" : "danger"),
       value: `${Math.round(ticketSellThrough * 100)}% sold`,
     },
+    ticketPricingAdvisor,
   };
+}
+
+function getRevenueAdvisorAction({
+  potentialRevenueGain,
+  revenueGap,
+  sponsorOpportunityValue,
+  unsoldTicketValue,
+}: {
+  potentialRevenueGain: number;
+  revenueGap: number;
+  sponsorOpportunityValue: number;
+  unsoldTicketValue: number;
+}) {
+  if (revenueGap <= 0) {
+    return "Revenue target is covered. Keep collection follow-ups tight and monitor any pending expense pressure.";
+  }
+  if (unsoldTicketValue >= sponsorOpportunityValue) {
+    return `Focus on converting unsold ticket inventory first. It can cover up to ${formatCurrency(Math.min(unsoldTicketValue, revenueGap))} of the current gap.`;
+  }
+  if (sponsorOpportunityValue > 0) {
+    return `Sponsor follow-up can make the fastest dent in the gap, with an estimated opportunity of ${formatCurrency(Math.min(sponsorOpportunityValue, revenueGap))}.`;
+  }
+  return potentialRevenueGain > 0
+    ? "Split effort between ticket conversion and sponsor collections to close the remaining gap."
+    : "Add revenue sources or update expected revenue so the advisory model has enough signal.";
+}
+
+function getTicketPricingAdvisor(tickets: NonNullable<ReturnType<typeof calculateEventWorkspace>>["tickets"]) {
+  const ticketSummaries = tickets
+    .filter((ticket) => ticket.inventory > 0)
+    .map((ticket) => ({
+      ...ticket,
+      remaining: Math.max(ticket.inventory - ticket.sold, 0),
+      sellThrough: ticket.sold / ticket.inventory,
+    }));
+
+  if (ticketSummaries.length === 0) {
+    return {
+      strongCategory: "Not configured",
+      suggestedAction: "Create ticket categories before adjusting pricing or promotion strategy.",
+      tone: getCopilotTone("danger"),
+      weakCategory: "Not configured",
+    };
+  }
+
+  const sortedByDemand = [...ticketSummaries].sort((a, b) => b.sellThrough - a.sellThrough);
+  const strongest = sortedByDemand[0];
+  const weakest = [...ticketSummaries].sort((a, b) => a.sellThrough - b.sellThrough)[0];
+  const strongCategory = `${strongest.name} (${Math.round(strongest.sellThrough * 100)}% sold)`;
+  const weakCategory = weakest.sellThrough < 0.35 ? `${weakest.name} (${Math.round(weakest.sellThrough * 100)}% sold)` : "None";
+  const suggestedAction = strongest.sellThrough >= 0.8 && strongest.remaining > 0
+    ? `${strongest.name} is moving strongly. Consider a higher next-batch price or premium bundle for future releases.`
+    : weakest.sellThrough < 0.25
+      ? `${weakest.name} is underperforming. Market this category more clearly before reducing price.`
+      : weakest.sellThrough < 0.45
+        ? `${weakest.name} needs attention. Test targeted offers or better placement in campaigns.`
+        : "Ticket categories are balanced. Keep pricing stable and monitor sell-through by category.";
+
+  return {
+    strongCategory,
+    suggestedAction,
+    tone: getCopilotTone(strongest.sellThrough >= 0.65 ? "success" : weakest.sellThrough < 0.25 ? "warning" : "primary"),
+    weakCategory,
+  };
+}
+
+function getSponsorCategorySuggestions(eventType: EventOSData["events"][number]["eventType"]) {
+  const suggestions: Record<EventOSData["events"][number]["eventType"], string[]> = {
+    "College Fest": ["Education", "Food Brands", "Youth Fashion"],
+    "Comedy Show": ["Food & Beverage", "Real Estate", "Local Retail"],
+    "Concert": ["Beverage", "Telecom", "Fashion"],
+    "Conference": ["SaaS", "Banking", "Hospitality"],
+    "Corporate Event": ["Banking", "Hospitality", "Automobile"],
+    Custom: ["Local Retail", "Jewellers", "Automobile"],
+  };
+
+  return suggestions[eventType] ?? suggestions.Custom;
+}
+
+function buildPriorityActions({
+  activeSponsorCount,
+  incompleteTasks,
+  openHighPriorityTasks,
+  revenueGap,
+  scoped,
+  sponsorGap,
+  ticketPricingAction,
+  unsoldTickets,
+}: {
+  activeSponsorCount: number;
+  incompleteTasks: number;
+  openHighPriorityTasks: number;
+  revenueGap: number;
+  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>;
+  sponsorGap: number;
+  ticketPricingAction: string;
+  unsoldTickets: number;
+}) {
+  const actions: string[] = [];
+
+  if (revenueGap > 0) {
+    actions.push(`Close the ${formatCurrency(revenueGap)} revenue gap before expanding expense commitments.`);
+  }
+  if (unsoldTickets > 0) {
+    actions.push(`Push ticket conversion for ${formatNumber(unsoldTickets)} unsold seats with category-specific campaigns.`);
+  }
+  if (sponsorGap > 0 || activeSponsorCount > 0) {
+    actions.push("Move sponsor conversations toward proposal, agreement and payment milestones.");
+  } else if (scoped.sponsors.length === 0) {
+    actions.push("Build a sponsor target list for this event to reduce dependence on ticket revenue.");
+  }
+  if (openHighPriorityTasks > 0) {
+    actions.push(`Resolve ${formatNumber(openHighPriorityTasks)} open high-priority task ${openHighPriorityTasks === 1 ? "risk" : "risks"}.`);
+  } else if (incompleteTasks > 0) {
+    actions.push(`Review ${formatNumber(incompleteTasks)} incomplete task ${incompleteTasks === 1 ? "item" : "items"} and confirm owners.`);
+  }
+  if (!actions.some((action) => action === ticketPricingAction)) {
+    actions.push(ticketPricingAction);
+  }
+
+  if (actions.length === 0) {
+    actions.push("Keep monitoring revenue, sponsor collection, ticket movement and task completion as the event date approaches.");
+  }
+
+  return actions.slice(0, 5);
 }
 
 function buildCopilotRecommendations({
