@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, MapPin, Sparkles, Ticket, TrendingUp } from "lucide-react";
+import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, MapPin, RefreshCw, Sparkles, Ticket, TrendingUp } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { generateAIEventPlan, type AICenterBackendMode, type AIEventPlan } from "../lib/aiCenterClient";
 import { formatCurrency, formatNumber } from "../utils/finance";
@@ -34,11 +34,13 @@ export default function AICenter() {
   const [hasPreview, setHasPreview] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [plan, setPlan] = useState<AIEventPlan>(mockPlan);
+  const [planActionMessage, setPlanActionMessage] = useState("");
 
   const generatePreview = async () => {
     setIsGenerating(true);
     setBackendMessage("");
     setFallbackMessage("");
+    setPlanActionMessage("");
 
     try {
       const response = await generateAIEventPlan(prompt.trim() || "Create a premium EventOS event plan.");
@@ -54,6 +56,32 @@ export default function AICenter() {
       setHasPreview(true);
       setIsGenerating(false);
     }
+  };
+
+  const copyPlan = async () => {
+    const planText = formatPlanForExport(plan);
+
+    try {
+      await navigator.clipboard.writeText(planText);
+      setPlanActionMessage("Plan copied to clipboard.");
+    } catch {
+      setPlanActionMessage("Clipboard access was blocked by the browser. Use Download Plan instead.");
+    }
+  };
+
+  const downloadPlan = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([formatPlanForExport(plan)], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `event-plan-${today}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setPlanActionMessage("Plan downloaded as a text file.");
   };
 
   return (
@@ -116,19 +144,54 @@ export default function AICenter() {
 
       {hasPreview && (
         <section className="glass-panel rounded-lg p-4 sm:p-5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI plan preview</p>
               <h2 className="mt-1 text-xl font-semibold text-white">Generated Event Plan</h2>
             </div>
-            <span className="inline-flex self-start rounded-full border border-app-primary/30 bg-app-primary/10 px-3 py-1 text-xs font-medium text-blue-100 sm:self-auto">
-              {getModeLabel(backendMode)}
-            </span>
+            <div className="flex flex-col gap-3 sm:items-end">
+              <span className="inline-flex self-start rounded-full border border-app-primary/30 bg-app-primary/10 px-3 py-1 text-xs font-medium text-blue-100 sm:self-auto">
+                {getModeLabel(backendMode)}
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-100 transition hover:border-app-primary/40 hover:bg-app-primary/10 focus:outline-none focus:ring-2 focus:ring-app-primary/35"
+                  onClick={() => void copyPlan()}
+                  type="button"
+                >
+                  <Copy size={16} />
+                  Copy Plan
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-100 transition hover:border-app-primary/40 hover:bg-app-primary/10 focus:outline-none focus:ring-2 focus:ring-app-primary/35"
+                  onClick={downloadPlan}
+                  type="button"
+                >
+                  <Download size={16} />
+                  Download Plan
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-app-primary px-3 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isGenerating}
+                  onClick={() => void generatePreview()}
+                  type="button"
+                >
+                  <RefreshCw className={isGenerating ? "animate-spin" : ""} size={16} />
+                  {isGenerating ? "Regenerating..." : "Regenerate Plan"}
+                </button>
+              </div>
+            </div>
           </div>
 
           {(backendMessage || fallbackMessage) && (
             <p className={`mt-4 rounded-lg border px-3 py-2 text-sm ${backendMessage ? "border-app-success/30 bg-app-success/10 text-green-100" : "border-app-warning/30 bg-app-warning/10 text-amber-100"}`}>
               {backendMessage || fallbackMessage}
+            </p>
+          )}
+
+          {planActionMessage && (
+            <p className="mt-4 rounded-lg border border-app-primary/25 bg-app-primary/10 px-3 py-2 text-sm text-blue-100">
+              {planActionMessage}
             </p>
           )}
 
@@ -217,6 +280,31 @@ function PreviewList({ items, title }: { items: string[]; title: string }) {
 
 function formatTicketCategory(category: AIEventPlan["ticketCategories"][number]) {
   return `${category.name} - ${formatCurrency(category.price)} - ${formatNumber(category.inventory)} inventory`;
+}
+
+function formatPlanForExport(plan: AIEventPlan) {
+  const lines = [
+    "EventOS AI Event Plan",
+    "",
+    `Event Name: ${plan.eventName}`,
+    `Venue: ${plan.venue}`,
+    `Capacity: ${formatNumber(plan.capacity)} guests`,
+    `Revenue Forecast: ${formatCurrency(plan.revenueForecast)}`,
+    "",
+    "Ticket Categories:",
+    ...plan.ticketCategories.map((category) => `- ${category.name}: ${formatCurrency(category.price)}, ${formatNumber(category.inventory)} inventory`),
+    "",
+    "Suggested Sponsors:",
+    ...plan.suggestedSponsors.map((sponsor) => `- ${sponsor}`),
+    "",
+    "Suggested Tasks:",
+    ...plan.suggestedTasks.map((task) => `- ${task}`),
+    "",
+    "Risks:",
+    ...plan.risks.map((risk) => `- ${risk}`),
+  ];
+
+  return `${lines.join("\n")}\n`;
 }
 
 function getModeLabel(mode: AICenterBackendMode | "frontend-fallback") {
