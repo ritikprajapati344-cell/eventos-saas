@@ -117,7 +117,18 @@ function AuthenticatedApp() {
             />
           )}
         />
-        <Route path="/ai-center" element={<AICenter />} />
+        <Route
+          path="/ai-center"
+          element={(
+            <AICenter
+              data={data}
+              eventsData={eventsData}
+              setData={setData}
+              tasksData={tasksData}
+              ticketingData={ticketingData}
+            />
+          )}
+        />
         <Route path="/events" element={<Events activitiesData={activitiesData} data={data} eventFilesData={eventFilesData} eventsData={eventsData} setData={setData} />} />
         <Route
           path="/events/:eventId"
