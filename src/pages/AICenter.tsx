@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, MapPin, Sparkles, Ticket, TrendingUp } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
+import { generateAIEventPlan, type AIEventPlan } from "../lib/aiCenterClient";
+import { formatCurrency, formatNumber } from "../utils/finance";
 
 const mockPlan = {
-  capacity: "1,500 guests",
+  capacity: 1500,
   eventName: "AI-Powered Gala Night",
-  revenueForecast: "INR 42,00,000 projected gross revenue",
+  revenueForecast: 4200000,
   suggestedSponsors: ["HDFC Bank", "Reliance Retail", "JK Cement", "Local hospitality partner"],
   suggestedTasks: [
     "Finalize venue layout and access plan",
@@ -14,16 +16,39 @@ const mockPlan = {
     "Create ticket launch calendar",
     "Assign vendor payment follow-ups",
   ],
-  ticketCategories: ["Sofa - INR 15,000", "Gold - INR 5,000", "Silver - INR 2,500", "Student Pass - INR 999"],
+  ticketCategories: [
+    { name: "Sofa", price: 15000, inventory: 120 },
+    { name: "Gold", price: 5000, inventory: 500 },
+    { name: "Silver", price: 2500, inventory: 700 },
+    { name: "Student Pass", price: 999, inventory: 180 },
+  ],
   venue: "Premium indoor auditorium",
 };
 
 export default function AICenter() {
+  const [backendMessage, setBackendMessage] = useState("");
+  const [fallbackMessage, setFallbackMessage] = useState("");
   const [prompt, setPrompt] = useState("");
   const [hasPreview, setHasPreview] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [plan, setPlan] = useState<AIEventPlan>(mockPlan);
 
-  const generatePreview = () => {
-    setHasPreview(true);
+  const generatePreview = async () => {
+    setIsGenerating(true);
+    setBackendMessage("");
+    setFallbackMessage("");
+
+    try {
+      const response = await generateAIEventPlan(prompt.trim() || "Create a premium EventOS event plan.");
+      setPlan(response.plan);
+      setBackendMessage(response.message);
+    } catch {
+      setPlan(mockPlan);
+      setFallbackMessage("AI Center backend is not reachable locally yet. Showing the built-in mock preview.");
+    } finally {
+      setHasPreview(true);
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -41,8 +66,8 @@ export default function AICenter() {
             </div>
             <div className="min-w-0">
               <h2 className="text-lg font-semibold text-white">Event Planning Prompt</h2>
-              <p className="mt-1 text-sm leading-6 text-app-muted">
-                Describe the event concept, audience, city, budget, artist, or sponsor goals. V2 AI integration is not connected yet.
+            <p className="mt-1 text-sm leading-6 text-app-muted">
+                Describe the event concept, audience, city, budget, artist, or sponsor goals. This sprint uses a mock AI backend only.
               </p>
             </div>
           </div>
@@ -59,15 +84,16 @@ export default function AICenter() {
 
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-app-muted">
-              This sprint shows a static mock preview only. No AI API request is made.
+              This sprint calls a mock Supabase Edge Function when available. No external AI API request is made.
             </p>
             <button
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45"
-              onClick={generatePreview}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isGenerating}
+              onClick={() => void generatePreview()}
               type="button"
             >
               <Sparkles size={17} />
-              Generate Event Plan
+              {isGenerating ? "Generating..." : "Generate Event Plan"}
             </button>
           </div>
         </div>
@@ -87,25 +113,31 @@ export default function AICenter() {
         <section className="glass-panel rounded-lg p-4 sm:p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Static mock preview</p>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI plan preview</p>
               <h2 className="mt-1 text-xl font-semibold text-white">Generated Event Plan</h2>
             </div>
-            <span className="inline-flex self-start rounded-full border border-app-warning/30 bg-app-warning/10 px-3 py-1 text-xs font-medium text-amber-100 sm:self-auto">
-              Mock only
+            <span className="inline-flex self-start rounded-full border border-app-primary/30 bg-app-primary/10 px-3 py-1 text-xs font-medium text-blue-100 sm:self-auto">
+              {backendMessage ? "Mock backend" : "Fallback mock"}
             </span>
           </div>
 
+          {(backendMessage || fallbackMessage) && (
+            <p className={`mt-4 rounded-lg border px-3 py-2 text-sm ${backendMessage ? "border-app-success/30 bg-app-success/10 text-green-100" : "border-app-warning/30 bg-app-warning/10 text-amber-100"}`}>
+              {backendMessage || fallbackMessage}
+            </p>
+          )}
+
           <div className="mt-5 grid gap-4 lg:grid-cols-3">
-            <PreviewTile icon={Sparkles} label="Event Name" value={mockPlan.eventName} />
-            <PreviewTile icon={MapPin} label="Venue" value={mockPlan.venue} />
-            <PreviewTile icon={Ticket} label="Capacity" value={mockPlan.capacity} />
+            <PreviewTile icon={Sparkles} label="Event Name" value={plan.eventName} />
+            <PreviewTile icon={MapPin} label="Venue" value={plan.venue} />
+            <PreviewTile icon={Ticket} label="Capacity" value={`${formatNumber(plan.capacity)} guests`} />
           </div>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <PreviewList title="Ticket Categories" items={mockPlan.ticketCategories} />
-            <PreviewTile icon={TrendingUp} label="Revenue Forecast" value={mockPlan.revenueForecast} />
-            <PreviewList title="Suggested Sponsors" items={mockPlan.suggestedSponsors} />
-            <PreviewList title="Suggested Tasks" items={mockPlan.suggestedTasks} />
+            <PreviewList title="Ticket Categories" items={plan.ticketCategories.map(formatTicketCategory)} />
+            <PreviewTile icon={TrendingUp} label="Revenue Forecast" value={`${formatCurrency(plan.revenueForecast)} projected gross revenue`} />
+            <PreviewList title="Suggested Sponsors" items={plan.suggestedSponsors} />
+            <PreviewList title="Suggested Tasks" items={plan.suggestedTasks} />
           </div>
         </section>
       )}
@@ -175,4 +207,8 @@ function PreviewList({ items, title }: { items: string[]; title: string }) {
       </ul>
     </article>
   );
+}
+
+function formatTicketCategory(category: AIEventPlan["ticketCategories"][number]) {
+  return `${category.name} - ${formatCurrency(category.price)} - ${formatNumber(category.inventory)} inventory`;
 }
