@@ -1069,6 +1069,72 @@ function AICopilotPanel({
         </CopilotAdvisorCard>
       </div>
 
+      <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <BriefcaseBusiness className="text-blue-200" size={18} />
+              <p className="text-sm font-semibold text-white">Sponsor Lead Advisor</p>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-app-muted">
+              Read-only sponsor lead guidance from this event's current revenue, ticket, and sponsor pipeline data.
+            </p>
+          </div>
+          <div className="rounded-lg border border-app-primary/25 bg-app-primary/10 px-4 py-3 text-center">
+            <p className="text-xs uppercase tracking-[0.12em] text-blue-100">Sponsor Potential Score</p>
+            <p className={`mt-1 text-3xl font-semibold ${insights.sponsorLeadAdvisor.potentialScore >= 75 ? "text-green-200" : insights.sponsorLeadAdvisor.potentialScore >= 45 ? "text-amber-200" : "text-red-200"}`}>
+              {insights.sponsorLeadAdvisor.potentialScore}
+            </p>
+            <p className="text-xs text-app-muted">out of 100</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(260px,0.9fr)]">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <CopilotAdvisorStat label="Current Sponsor Revenue" value={formatCurrency(insights.sponsorLeadAdvisor.currentRevenue)} />
+            <CopilotAdvisorStat label="Sponsor Target" value={formatCurrency(insights.sponsorLeadAdvisor.sponsorTarget)} />
+            <CopilotAdvisorStat label="Sponsor Gap" tone={insights.sponsorLeadAdvisor.sponsorGap > 0 ? "warning" : "success"} value={formatCurrency(insights.sponsorLeadAdvisor.sponsorGap)} />
+          </div>
+          <div className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs uppercase tracking-[0.12em] text-app-muted">Sponsor Risk</span>
+              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${insights.sponsorLeadAdvisor.riskTone === "success" ? "border-app-success/30 bg-app-success/12 text-green-100" : insights.sponsorLeadAdvisor.riskTone === "warning" ? "border-app-warning/30 bg-app-warning/12 text-amber-100" : "border-app-danger/30 bg-app-danger/12 text-red-100"}`}>
+                {insights.sponsorLeadAdvisor.riskLevel}
+              </span>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-200">{insights.sponsorLeadAdvisor.riskReason}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          <CopilotListPanel title="Suggested Sponsor Categories" count={insights.sponsorLeadAdvisor.suggestedCategories.length}>
+            {insights.sponsorLeadAdvisor.suggestedCategories.map((category) => (
+              <li key={category} className="flex gap-2 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-primary" />
+                <span className="min-w-0 break-words">{category}</span>
+              </li>
+            ))}
+          </CopilotListPanel>
+
+          <CopilotListPanel title="Priority Outreach List" count={insights.sponsorLeadAdvisor.priorityOutreach.length}>
+            {insights.sponsorLeadAdvisor.priorityOutreach.map((outreach, index) => (
+              <li key={outreach.category} className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-app-primary/30 bg-app-primary/10 text-xs font-semibold text-blue-100">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-medium text-white">{outreach.category}</p>
+                    <p className="mt-1 text-xs leading-5 text-app-muted">{outreach.reason}</p>
+                    <p className="mt-1 text-xs text-green-200">Potential: {formatCurrency(outreach.estimatedValue)}</p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </CopilotListPanel>
+        </div>
+      </div>
+
       <div className="mt-5 grid gap-3 xl:grid-cols-3">
         <CopilotAdvisorCard icon={ListChecks} title="Task Risk Advisor" tone={insights.taskRiskAdvisor.tone}>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -1946,6 +2012,17 @@ function getCopilotInsights(
   const potentialRevenueGain = Math.min(revenueGap, unsoldTicketValue + sponsorOpportunityValue);
   const ticketPricingAdvisor = getTicketPricingAdvisor(scoped.tickets);
   const sponsorCategories = getSponsorCategorySuggestions(event.eventType);
+  const sponsorLeadAdvisor = getSponsorLeadAdvisor({
+    activeSponsorCount,
+    event,
+    expectedSponsorAmount,
+    revenueGap,
+    scoped,
+    sponsorCategories,
+    sponsorOpportunityValue,
+    ticketSellThrough,
+    wonSponsorCount,
+  });
   const taskRiskAdvisor = getTaskRiskAdvisor({ openHighPriorityTasks, overdueTasks, taskCompletion });
   const readiness = getEventReadiness({
     artistsCount: scoped.artists.length,
@@ -2052,6 +2129,7 @@ function getCopilotInsights(
       suggestedCategories: sponsorCategories,
       tone: getCopilotTone(sponsorGap === 0 && scoped.sponsorRevenue > 0 ? "success" : activeSponsorCount > 0 ? "warning" : "danger"),
     },
+    sponsorLeadAdvisor,
     task: {
       helper: scoped.tasks.length === 0
         ? "No event tasks are tracked yet."
@@ -2146,6 +2224,121 @@ function getSponsorCategorySuggestions(eventType: EventOSData["events"][number][
   };
 
   return suggestions[eventType] ?? suggestions.Custom;
+}
+
+function getSponsorLeadAdvisor({
+  activeSponsorCount,
+  event,
+  expectedSponsorAmount,
+  revenueGap,
+  scoped,
+  sponsorCategories,
+  sponsorOpportunityValue,
+  ticketSellThrough,
+  wonSponsorCount,
+}: {
+  activeSponsorCount: number;
+  event: EventOSData["events"][number];
+  expectedSponsorAmount: number;
+  revenueGap: number;
+  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>;
+  sponsorCategories: string[];
+  sponsorOpportunityValue: number;
+  ticketSellThrough: number;
+  wonSponsorCount: number;
+}) {
+  const sponsorTarget = Math.max(expectedSponsorAmount, Math.round(scoped.expectedRevenue * 0.25));
+  const currentRevenue = scoped.sponsorRevenue;
+  const sponsorGap = Math.max(sponsorTarget - currentRevenue, 0);
+  const capacityScore = event.capacity > 0 ? Math.min(100, Math.round((event.capacity / 2000) * 100)) : 25;
+  const pipelineScore = scoped.sponsors.length > 0
+    ? Math.min(100, Math.round(((wonSponsorCount / scoped.sponsors.length) * 55) + (activeSponsorCount > 0 ? 25 : 0) + (currentRevenue > 0 ? 20 : 0)))
+    : 20;
+  const revenueNeedScore = revenueGap > 0 ? Math.min(100, Math.round((sponsorOpportunityValue / Math.max(revenueGap, 1)) * 100)) : 60;
+  const demandScore = Math.round(ticketSellThrough * 100);
+  const potentialScore = clampScore(Math.round((capacityScore * 0.25) + (pipelineScore * 0.3) + (revenueNeedScore * 0.25) + (demandScore * 0.2)));
+  const riskLevel = sponsorGap === 0 && currentRevenue > 0
+    ? "Low"
+    : scoped.sponsors.length === 0 || sponsorGap > Math.max(sponsorTarget * 0.65, 1)
+      ? "High"
+      : activeSponsorCount > 0 || sponsorGap > 0
+        ? "Medium"
+        : "Low";
+  const riskReason = getSponsorRiskReason({
+    activeSponsorCount,
+    currentRevenue,
+    riskLevel,
+    scoped,
+    sponsorGap,
+    sponsorTarget,
+  });
+  const priorityOutreach = sponsorCategories.slice(0, 4).map((category, index) => ({
+    category,
+    estimatedValue: Math.max(Math.round((sponsorGap || sponsorOpportunityValue || sponsorTarget * 0.25) / Math.max(2, index + 2)), 0),
+    reason: getSponsorOutreachReason({ category, eventType: event.eventType, index, ticketSellThrough }),
+  }));
+
+  return {
+    currentRevenue,
+    potentialScore,
+    priorityOutreach,
+    riskLevel,
+    riskReason,
+    riskTone: getCopilotTone(riskLevel === "Low" ? "success" : riskLevel === "Medium" ? "warning" : "danger"),
+    sponsorGap,
+    sponsorTarget,
+    suggestedCategories: sponsorCategories,
+  };
+}
+
+function getSponsorRiskReason({
+  activeSponsorCount,
+  currentRevenue,
+  riskLevel,
+  scoped,
+  sponsorGap,
+  sponsorTarget,
+}: {
+  activeSponsorCount: number;
+  currentRevenue: number;
+  riskLevel: string;
+  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>;
+  sponsorGap: number;
+  sponsorTarget: number;
+}) {
+  if (riskLevel === "Low") {
+    return "Sponsor revenue is tracking against the current target.";
+  }
+  if (scoped.sponsors.length === 0) {
+    return `No sponsor leads are attached while the sponsor target is ${formatCurrency(sponsorTarget)}.`;
+  }
+  if (currentRevenue === 0 && activeSponsorCount > 0) {
+    return "Sponsor conversations exist, but no sponsor revenue has been received yet.";
+  }
+  if (sponsorGap > 0) {
+    return `${formatCurrency(sponsorGap)} sponsor gap remains against the current target.`;
+  }
+  return "Sponsor pipeline needs follow-up to reduce event revenue dependency.";
+}
+
+function getSponsorOutreachReason({
+  category,
+  eventType,
+  index,
+  ticketSellThrough,
+}: {
+  category: string;
+  eventType: EventOSData["events"][number]["eventType"];
+  index: number;
+  ticketSellThrough: number;
+}) {
+  if (ticketSellThrough >= 0.6) {
+    return `${category} is a strong fit because ticket demand can support premium visibility.`;
+  }
+  if (index === 0) {
+    return `${category} should be the first outreach lane for a ${eventType.toLowerCase()} audience.`;
+  }
+  return `${category} can help diversify sponsor revenue beyond ticket sales.`;
 }
 
 function getTaskRiskAdvisor({
