@@ -61,6 +61,11 @@ import {
   getTaskRiskAdvisor,
   getTaskRiskMetrics,
 } from "../intelligence/taskRisk";
+import {
+  getSponsorCategorySuggestions,
+  getSponsorInsightMetrics,
+  getSponsorLeadAdvisor,
+} from "../intelligence/sponsorInsights";
 import type { ActivityWriteInput } from "../lib/activitiesRepository";
 import {
   EVENT_FILE_MAX_SIZE,
@@ -2062,18 +2067,24 @@ function getCopilotInsights(
     overdueTasks,
     taskCompletion,
   } = getTaskRiskMetrics(scoped.tasks);
-  const activeSponsorCount = scoped.sponsors.filter((sponsor) => !["Closed Lost", "Closed Won"].includes(sponsor.status)).length;
-  const wonSponsorCount = scoped.sponsors.filter((sponsor) => sponsor.status === "Closed Won").length;
-  const closedSponsorAmount = scoped.sponsors.filter((sponsor) => sponsor.status === "Closed Won").reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
-  const expectedSponsorAmount = scoped.sponsors.filter((sponsor) => sponsor.status !== "Closed Lost").reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
-  const sponsorScore = scoped.sponsors.length > 0 ? wonSponsorCount / scoped.sponsors.length : 0.35;
+  const revenueGap = Math.max(scoped.expectedRevenue - scoped.actualRevenue, 0);
+  const {
+    activeSponsorCount,
+    closedSponsorAmount,
+    expectedSponsorAmount,
+    sponsorGap,
+    sponsorOpportunityValue,
+    sponsorScore,
+    wonSponsorCount,
+  } = getSponsorInsightMetrics({
+    revenueGap,
+    sponsorRevenue: scoped.sponsorRevenue,
+    sponsors: scoped.sponsors,
+  });
   const healthScore = clampScore(
     Math.round((revenueProgress * 35) + (ticketSellThrough * 25) + (taskCompletion * 20) + (sponsorScore * 20)),
   );
-  const revenueGap = Math.max(scoped.expectedRevenue - scoped.actualRevenue, 0);
   const unsoldTickets = Math.max(ticketInventory - scoped.totalTicketsSold, 0);
-  const sponsorGap = Math.max(expectedSponsorAmount - scoped.sponsorRevenue, 0);
-  const sponsorOpportunityValue = sponsorGap > 0 ? sponsorGap : Math.round(revenueGap * 0.25);
   const potentialRevenueGain = Math.min(revenueGap, unsoldTicketValue + sponsorOpportunityValue);
   const ticketPricingAdvisor = getTicketPricingAdvisor(scoped.tickets);
   const ticketPricingEngine = getTicketPricingEngine(scoped.tickets);
@@ -2239,134 +2250,6 @@ function getRevenueAdvisorAction({
   return potentialRevenueGain > 0
     ? "Split effort between ticket conversion and sponsor collections to close the remaining gap."
     : "Add revenue sources or update expected revenue so the advisory model has enough signal.";
-}
-
-function getSponsorCategorySuggestions(eventType: EventOSData["events"][number]["eventType"]) {
-  const suggestions: Record<EventOSData["events"][number]["eventType"], string[]> = {
-    "College Fest": ["Education", "Food Brands", "Youth Fashion"],
-    "Comedy Show": ["Food & Beverage", "Real Estate", "Local Retail"],
-    "Concert": ["Beverage", "Telecom", "Fashion"],
-    "Conference": ["SaaS", "Banking", "Hospitality"],
-    "Corporate Event": ["Banking", "Hospitality", "Automobile"],
-    Custom: ["Local Retail", "Jewellers", "Automobile"],
-  };
-
-  return suggestions[eventType] ?? suggestions.Custom;
-}
-
-function getSponsorLeadAdvisor({
-  activeSponsorCount,
-  event,
-  expectedSponsorAmount,
-  revenueGap,
-  scoped,
-  sponsorCategories,
-  sponsorOpportunityValue,
-  ticketSellThrough,
-  wonSponsorCount,
-}: {
-  activeSponsorCount: number;
-  event: EventOSData["events"][number];
-  expectedSponsorAmount: number;
-  revenueGap: number;
-  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>;
-  sponsorCategories: string[];
-  sponsorOpportunityValue: number;
-  ticketSellThrough: number;
-  wonSponsorCount: number;
-}) {
-  const sponsorTarget = Math.max(expectedSponsorAmount, Math.round(scoped.expectedRevenue * 0.25));
-  const currentRevenue = scoped.sponsorRevenue;
-  const sponsorGap = Math.max(sponsorTarget - currentRevenue, 0);
-  const capacityScore = event.capacity > 0 ? Math.min(100, Math.round((event.capacity / 2000) * 100)) : 25;
-  const pipelineScore = scoped.sponsors.length > 0
-    ? Math.min(100, Math.round(((wonSponsorCount / scoped.sponsors.length) * 55) + (activeSponsorCount > 0 ? 25 : 0) + (currentRevenue > 0 ? 20 : 0)))
-    : 20;
-  const revenueNeedScore = revenueGap > 0 ? Math.min(100, Math.round((sponsorOpportunityValue / Math.max(revenueGap, 1)) * 100)) : 60;
-  const demandScore = Math.round(ticketSellThrough * 100);
-  const potentialScore = clampScore(Math.round((capacityScore * 0.25) + (pipelineScore * 0.3) + (revenueNeedScore * 0.25) + (demandScore * 0.2)));
-  const riskLevel = sponsorGap === 0 && currentRevenue > 0
-    ? "Low"
-    : scoped.sponsors.length === 0 || sponsorGap > Math.max(sponsorTarget * 0.65, 1)
-      ? "High"
-      : activeSponsorCount > 0 || sponsorGap > 0
-        ? "Medium"
-        : "Low";
-  const riskReason = getSponsorRiskReason({
-    activeSponsorCount,
-    currentRevenue,
-    riskLevel,
-    scoped,
-    sponsorGap,
-    sponsorTarget,
-  });
-  const priorityOutreach = sponsorCategories.slice(0, 4).map((category, index) => ({
-    category,
-    estimatedValue: Math.max(Math.round((sponsorGap || sponsorOpportunityValue || sponsorTarget * 0.25) / Math.max(2, index + 2)), 0),
-    reason: getSponsorOutreachReason({ category, eventType: event.eventType, index, ticketSellThrough }),
-  }));
-
-  return {
-    currentRevenue,
-    potentialScore,
-    priorityOutreach,
-    riskLevel,
-    riskReason,
-    riskTone: getCopilotTone(riskLevel === "Low" ? "success" : riskLevel === "Medium" ? "warning" : "danger"),
-    sponsorGap,
-    sponsorTarget,
-    suggestedCategories: sponsorCategories,
-  };
-}
-
-function getSponsorRiskReason({
-  activeSponsorCount,
-  currentRevenue,
-  riskLevel,
-  scoped,
-  sponsorGap,
-  sponsorTarget,
-}: {
-  activeSponsorCount: number;
-  currentRevenue: number;
-  riskLevel: string;
-  scoped: NonNullable<ReturnType<typeof calculateEventWorkspace>>;
-  sponsorGap: number;
-  sponsorTarget: number;
-}) {
-  if (riskLevel === "Low") {
-    return "Sponsor revenue is tracking against the current target.";
-  }
-  if (scoped.sponsors.length === 0) {
-    return `No sponsor leads are attached while the sponsor target is ${formatCurrency(sponsorTarget)}.`;
-  }
-  if (currentRevenue === 0 && activeSponsorCount > 0) {
-    return "Sponsor conversations exist, but no sponsor revenue has been received yet.";
-  }
-  if (sponsorGap > 0) {
-    return `${formatCurrency(sponsorGap)} sponsor gap remains against the current target.`;
-  }
-  return "Sponsor pipeline needs follow-up to reduce event revenue dependency.";
-}
-
-function getSponsorOutreachReason({
-  category,
-  eventType,
-  index,
-  ticketSellThrough,
-}: {
-  category: string;
-  eventType: EventOSData["events"][number]["eventType"];
-  index: number;
-  ticketSellThrough: number;
-}) {
-  if (ticketSellThrough >= 0.6) {
-    return `${category} is a strong fit because ticket demand can support premium visibility.`;
-  }
-  if (index === 0) {
-    return `${category} should be the first outreach lane for a ${eventType.toLowerCase()} audience.`;
-  }
-  return `${category} can help diversify sponsor revenue beyond ticket sales.`;
 }
 
 function getEventReadiness({
