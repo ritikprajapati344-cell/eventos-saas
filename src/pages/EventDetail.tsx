@@ -50,6 +50,10 @@ import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
 import type { TimelineDataSource } from "../hooks/useTimelineData";
 import type { VendorsDataSource } from "../hooks/useVendorsData";
+import {
+  getTicketPricingAdvisor,
+  getTicketPricingEngine,
+} from "../intelligence/ticketInsights";
 import type { ActivityWriteInput } from "../lib/activitiesRepository";
 import {
   EVENT_FILE_MAX_SIZE,
@@ -1073,6 +1077,64 @@ function AICopilotPanel({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
+              <Ticket className="text-blue-200" size={18} />
+              <p className="text-sm font-semibold text-white">AI Ticket Pricing Engine</p>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-app-muted">
+              Read-only ticket pricing guidance from this event's current category, inventory, sold, and price data.
+            </p>
+          </div>
+          <div className="rounded-lg border border-app-primary/25 bg-app-primary/10 px-4 py-3 text-center">
+            <p className="text-xs uppercase tracking-[0.12em] text-blue-100">Sell Through</p>
+            <p className={`mt-1 text-3xl font-semibold ${insights.ticketPricingEngine.demandTone === "success" ? "text-green-200" : insights.ticketPricingEngine.demandTone === "warning" ? "text-amber-200" : "text-red-200"}`}>
+              {insights.ticketPricingEngine.sellThroughPercent}%
+            </p>
+            <p className="text-xs text-app-muted">Demand Level: {insights.ticketPricingEngine.demandLevel}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(260px,0.95fr)]">
+          <CopilotAdvisorCard icon={BadgeIndianRupee} title="Revenue Optimization Card" tone={insights.ticketPricingEngine.revenueOpportunity > 0 ? "warning" : "success"}>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <CopilotAdvisorStat label="Current Ticket Revenue" value={formatCurrency(insights.ticketPricingEngine.currentRevenue)} />
+              <CopilotAdvisorStat label="Potential Revenue" value={formatCurrency(insights.ticketPricingEngine.potentialRevenue)} />
+              <CopilotAdvisorStat label="Revenue Opportunity" tone={insights.ticketPricingEngine.revenueOpportunity > 0 ? "warning" : "success"} value={formatCurrency(insights.ticketPricingEngine.revenueOpportunity)} />
+            </div>
+            <p className="mt-3 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+              {insights.ticketPricingEngine.pricingRecommendation}
+            </p>
+          </CopilotAdvisorCard>
+
+          <CopilotAdvisorCard icon={Ticket} title="Ticket Category Signals" tone={insights.ticketPricingEngine.demandTone}>
+            <div className="grid gap-2">
+              <CopilotAdvisorStat label="Strongest Ticket Category" value={insights.ticketPricingEngine.strongestCategory} />
+              <CopilotAdvisorStat label="Weakest Ticket Category" tone={insights.ticketPricingEngine.weakestCategory === "None" ? "success" : "warning"} value={insights.ticketPricingEngine.weakestCategory} />
+              <CopilotAdvisorStat label="Pricing Recommendation" value={insights.ticketPricingEngine.primarySuggestion} />
+            </div>
+          </CopilotAdvisorCard>
+        </div>
+
+        <CopilotListPanel title="Pricing Suggestions" count={insights.ticketPricingEngine.suggestions.length}>
+          {insights.ticketPricingEngine.suggestions.map((suggestion) => (
+            <li key={`${suggestion.category}-${suggestion.action}`} className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-medium text-white">{suggestion.category}</p>
+                  <p className="mt-1 text-xs leading-5 text-app-muted">{suggestion.reason}</p>
+                </div>
+                <span className={`w-fit shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${suggestion.action === "Increase" ? "border-app-success/30 bg-app-success/12 text-green-100" : suggestion.action === "Decrease" ? "border-app-danger/30 bg-app-danger/12 text-red-100" : "border-app-primary/30 bg-app-primary/12 text-blue-100"}`}>
+                  {suggestion.action}
+                </span>
+              </div>
+            </li>
+          ))}
+        </CopilotListPanel>
+      </div>
+
+      <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
               <BriefcaseBusiness className="text-blue-200" size={18} />
               <p className="text-sm font-semibold text-white">Sponsor Lead Advisor</p>
             </div>
@@ -2011,6 +2073,7 @@ function getCopilotInsights(
   const sponsorOpportunityValue = sponsorGap > 0 ? sponsorGap : Math.round(revenueGap * 0.25);
   const potentialRevenueGain = Math.min(revenueGap, unsoldTicketValue + sponsorOpportunityValue);
   const ticketPricingAdvisor = getTicketPricingAdvisor(scoped.tickets);
+  const ticketPricingEngine = getTicketPricingEngine(scoped.tickets);
   const sponsorCategories = getSponsorCategorySuggestions(event.eventType);
   const sponsorLeadAdvisor = getSponsorLeadAdvisor({
     activeSponsorCount,
@@ -2146,6 +2209,7 @@ function getCopilotInsights(
       value: `${Math.round(ticketSellThrough * 100)}% sold`,
     },
     ticketPricingAdvisor,
+    ticketPricingEngine,
   };
 }
 
@@ -2172,45 +2236,6 @@ function getRevenueAdvisorAction({
   return potentialRevenueGain > 0
     ? "Split effort between ticket conversion and sponsor collections to close the remaining gap."
     : "Add revenue sources or update expected revenue so the advisory model has enough signal.";
-}
-
-function getTicketPricingAdvisor(tickets: NonNullable<ReturnType<typeof calculateEventWorkspace>>["tickets"]) {
-  const ticketSummaries = tickets
-    .filter((ticket) => ticket.inventory > 0)
-    .map((ticket) => ({
-      ...ticket,
-      remaining: Math.max(ticket.inventory - ticket.sold, 0),
-      sellThrough: ticket.sold / ticket.inventory,
-    }));
-
-  if (ticketSummaries.length === 0) {
-    return {
-      strongCategory: "Not configured",
-      suggestedAction: "Create ticket categories before adjusting pricing or promotion strategy.",
-      tone: getCopilotTone("danger"),
-      weakCategory: "Not configured",
-    };
-  }
-
-  const sortedByDemand = [...ticketSummaries].sort((a, b) => b.sellThrough - a.sellThrough);
-  const strongest = sortedByDemand[0];
-  const weakest = [...ticketSummaries].sort((a, b) => a.sellThrough - b.sellThrough)[0];
-  const strongCategory = `${strongest.name} (${Math.round(strongest.sellThrough * 100)}% sold)`;
-  const weakCategory = weakest.sellThrough < 0.35 ? `${weakest.name} (${Math.round(weakest.sellThrough * 100)}% sold)` : "None";
-  const suggestedAction = strongest.sellThrough >= 0.8 && strongest.remaining > 0
-    ? `${strongest.name} is moving strongly. Consider a higher next-batch price or premium bundle for future releases.`
-    : weakest.sellThrough < 0.25
-      ? `${weakest.name} is underperforming. Market this category more clearly before reducing price.`
-      : weakest.sellThrough < 0.45
-        ? `${weakest.name} needs attention. Test targeted offers or better placement in campaigns.`
-        : "Ticket categories are balanced. Keep pricing stable and monitor sell-through by category.";
-
-  return {
-    strongCategory,
-    suggestedAction,
-    tone: getCopilotTone(strongest.sellThrough >= 0.65 ? "success" : weakest.sellThrough < 0.25 ? "warning" : "primary"),
-    weakCategory,
-  };
 }
 
 function getSponsorCategorySuggestions(eventType: EventOSData["events"][number]["eventType"]) {
