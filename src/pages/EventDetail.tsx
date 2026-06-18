@@ -66,6 +66,7 @@ import {
   getSponsorInsightMetrics,
   getSponsorLeadAdvisor,
 } from "../intelligence/sponsorInsights";
+import { getRevenueInsightMetrics } from "../intelligence/revenueInsights";
 import type { ActivityWriteInput } from "../lib/activitiesRepository";
 import {
   EVENT_FILE_MAX_SIZE,
@@ -2059,7 +2060,6 @@ function getCopilotInsights(
   const ticketInventory = scoped.tickets.reduce((sum, ticket) => sum + ticket.inventory, 0);
   const ticketSellThrough = ticketInventory > 0 ? scoped.totalTicketsSold / ticketInventory : 0;
   const unsoldTicketValue = scoped.tickets.reduce((sum, ticket) => sum + Math.max(ticket.inventory - ticket.sold, 0) * ticket.price, 0);
-  const revenueProgress = scoped.expectedRevenue > 0 ? scoped.actualRevenue / scoped.expectedRevenue : 0;
   const {
     dueSoonTasks,
     incompleteTasks,
@@ -2067,7 +2067,7 @@ function getCopilotInsights(
     overdueTasks,
     taskCompletion,
   } = getTaskRiskMetrics(scoped.tasks);
-  const revenueGap = Math.max(scoped.expectedRevenue - scoped.actualRevenue, 0);
+  const initialRevenueGap = Math.max(scoped.expectedRevenue - scoped.actualRevenue, 0);
   const {
     activeSponsorCount,
     closedSponsorAmount,
@@ -2077,15 +2077,21 @@ function getCopilotInsights(
     sponsorScore,
     wonSponsorCount,
   } = getSponsorInsightMetrics({
-    revenueGap,
+    revenueGap: initialRevenueGap,
     sponsorRevenue: scoped.sponsorRevenue,
     sponsors: scoped.sponsors,
   });
+  const revenueInsights = getRevenueInsightMetrics({
+    actualRevenue: scoped.actualRevenue,
+    expectedRevenue: scoped.expectedRevenue,
+    sponsorOpportunityValue,
+    unsoldTicketValue,
+  });
+  const { potentialRevenueGain, revenueGap, revenueProgress } = revenueInsights;
   const healthScore = clampScore(
     Math.round((revenueProgress * 35) + (ticketSellThrough * 25) + (taskCompletion * 20) + (sponsorScore * 20)),
   );
   const unsoldTickets = Math.max(ticketInventory - scoped.totalTicketsSold, 0);
-  const potentialRevenueGain = Math.min(revenueGap, unsoldTicketValue + sponsorOpportunityValue);
   const ticketPricingAdvisor = getTicketPricingAdvisor(scoped.tickets);
   const ticketPricingEngine = getTicketPricingEngine(scoped.tickets);
   const sponsorCategories = getSponsorCategorySuggestions(event.eventType);
@@ -2176,21 +2182,8 @@ function getCopilotInsights(
     priorityActions,
     readiness,
     recommendations,
-    revenue: {
-      helper: revenueGap > 0
-        ? `${formatCurrency(revenueGap)} gap against expected revenue.`
-        : "Actual revenue has reached or exceeded expectation.",
-      tone: getCopilotTone(revenueProgress >= 0.75 ? "success" : revenueProgress >= 0.35 ? "warning" : "danger"),
-      value: `${Math.min(100, Math.round(revenueProgress * 100))}% recorded`,
-    },
-    revenueAdvisor: {
-      expectedRevenue: scoped.expectedRevenue,
-      potentialRevenueGain,
-      recordedRevenue: scoped.actualRevenue,
-      revenueGap,
-      suggestedAction: getRevenueAdvisorAction({ potentialRevenueGain, revenueGap, sponsorOpportunityValue, unsoldTicketValue }),
-      tone: getCopilotTone(revenueGap === 0 ? "success" : potentialRevenueGain > 0 ? "warning" : "danger"),
-    },
+    revenue: revenueInsights.revenue,
+    revenueAdvisor: revenueInsights.revenueAdvisor,
     sponsor: {
       helper: scoped.sponsors.length === 0
         ? "No sponsor pipeline attached to this event yet."
@@ -2225,31 +2218,6 @@ function getCopilotInsights(
     ticketPricingAdvisor,
     ticketPricingEngine,
   };
-}
-
-function getRevenueAdvisorAction({
-  potentialRevenueGain,
-  revenueGap,
-  sponsorOpportunityValue,
-  unsoldTicketValue,
-}: {
-  potentialRevenueGain: number;
-  revenueGap: number;
-  sponsorOpportunityValue: number;
-  unsoldTicketValue: number;
-}) {
-  if (revenueGap <= 0) {
-    return "Revenue target is covered. Keep collection follow-ups tight and monitor any pending expense pressure.";
-  }
-  if (unsoldTicketValue >= sponsorOpportunityValue) {
-    return `Focus on converting unsold ticket inventory first. It can cover up to ${formatCurrency(Math.min(unsoldTicketValue, revenueGap))} of the current gap.`;
-  }
-  if (sponsorOpportunityValue > 0) {
-    return `Sponsor follow-up can make the fastest dent in the gap, with an estimated opportunity of ${formatCurrency(Math.min(sponsorOpportunityValue, revenueGap))}.`;
-  }
-  return potentialRevenueGain > 0
-    ? "Split effort between ticket conversion and sponsor collections to close the remaining gap."
-    : "Add revenue sources or update expected revenue so the advisory model has enough signal.";
 }
 
 function getEventReadiness({
