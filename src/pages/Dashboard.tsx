@@ -292,6 +292,10 @@ export default function Dashboard({
     ),
     [isSupabaseMode, scopedData.tasks],
   );
+  const executiveInsights = useMemo(
+    () => buildExecutiveInsights(scopedData, scopedFinanceTransactions, scope.shortLabel),
+    [scopedData, scopedFinanceTransactions, scope.shortLabel],
+  );
 
   return (
     <div className="space-y-5 overflow-hidden pb-2">
@@ -314,6 +318,104 @@ export default function Dashboard({
         <KpiCard title="Net Profit" value={formatCurrency(netProfit)} helper="Revenue minus expenses" icon={TrendingUp} tone="success" />
         <KpiCard title="Tickets Sold" value={`${formatNumber(ticketsSold)}/${formatNumber(ticketInventory)}`} helper={`${formatNumber(availableTickets)} available`} icon={CircleDollarSign} />
         <KpiCard title="Sponsors Won" value={formatNumber(sponsorsClosed)} helper={formatCurrency(getSponsorRevenue(scopedData.sponsors))} icon={BriefcaseBusiness} tone="danger" />
+      </section>
+
+      <section className="glass-panel min-w-0 rounded-lg p-4 sm:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI Executive Dashboard</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">Workspace command summary</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+              Read-only executive signals from current {scope.shortLabel} data. No records are created from this section.
+            </p>
+          </div>
+          <div className="rounded-lg border border-app-primary/25 bg-app-primary/10 px-4 py-3 text-center">
+            <p className="text-xs uppercase tracking-[0.12em] text-blue-100">Workspace Health Score</p>
+            <p className={`mt-1 text-3xl font-semibold ${executiveInsights.healthScore >= 75 ? "text-green-200" : executiveInsights.healthScore >= 50 ? "text-amber-200" : "text-red-200"}`}>
+              {executiveInsights.healthScore}
+            </p>
+            <p className="text-xs text-app-muted">out of 100</p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <ExecutiveSignalCard
+            helper={executiveInsights.healthSummary}
+            icon={ShieldCheck}
+            title="Workspace Health Score"
+            tone={executiveInsights.healthScore >= 75 ? "success" : executiveInsights.healthScore >= 50 ? "warning" : "danger"}
+            value={`${executiveInsights.healthScore}/100`}
+          />
+          <ExecutiveSignalCard
+            helper={`${formatNumber(executiveInsights.topRiskEvents.length)} high-focus events in ${scope.shortLabel}`}
+            icon={TicketX}
+            title="Top Risk Events"
+            tone={executiveInsights.topRiskEvents.length > 0 ? "warning" : "success"}
+            value={executiveInsights.topRiskEvents[0]?.name ?? "None flagged"}
+          />
+          <ExecutiveSignalCard
+            helper="Expected event revenue not yet covered by tickets, sponsors or dated income"
+            icon={BadgeIndianRupee}
+            title="Revenue At Risk"
+            tone={executiveInsights.revenueAtRisk > 0 ? "warning" : "success"}
+            value={formatCurrency(executiveInsights.revenueAtRisk)}
+          />
+          <ExecutiveSignalCard
+            helper={`${formatNumber(executiveInsights.sponsorPipeline.activeDeals)} active deals, ${formatNumber(executiveInsights.sponsorPipeline.wonDeals)} won`}
+            icon={BriefcaseBusiness}
+            title="Sponsor Pipeline Health"
+            tone={executiveInsights.sponsorPipeline.tone}
+            value={`${executiveInsights.sponsorPipeline.conversionRate}% conversion`}
+          />
+        </div>
+
+        <div className="mt-5 grid gap-3 xl:grid-cols-3">
+          <ExecutiveListPanel count={executiveInsights.topRiskEvents.length} title="Top Risk Events">
+            {executiveInsights.topRiskEvents.map((event) => (
+              <li key={event.id} className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-medium text-white">{event.name}</p>
+                    <p className="mt-1 text-xs leading-5 text-app-muted">{event.reason}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${event.riskScore >= 70 ? "border-app-danger/30 bg-app-danger/12 text-red-100" : "border-app-warning/30 bg-app-warning/12 text-amber-100"}`}>
+                    {event.riskScore}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ExecutiveListPanel>
+
+          <ExecutiveListPanel count={executiveInsights.criticalTasks.length} title="Upcoming Critical Tasks">
+            {executiveInsights.criticalTasks.map((task) => {
+              const linkedEvent = data.events.find((event) => event.id === task.eventId);
+              return (
+                <li key={task.id} className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2">
+                  <div className="flex flex-col gap-2 min-[430px]:flex-row min-[430px]:items-start min-[430px]:justify-between">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-medium text-white">{task.title}</p>
+                      <p className="mt-1 text-xs text-app-muted">Due {new Date(task.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</p>
+                      <EventContextChip className="mt-2" event={linkedEvent} />
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-1">
+                      <StatusBadge label={task.priority} tone={priorityTone[task.priority]} />
+                      <StatusBadge label={task.status} tone={taskStatusTone[task.status]} />
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ExecutiveListPanel>
+
+          <ExecutiveListPanel count={executiveInsights.summary.length} title="AI Executive Summary">
+            {executiveInsights.summary.map((item) => (
+              <li key={item} className="flex gap-2 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-primary" />
+                <span className="min-w-0 break-words">{item}</span>
+              </li>
+            ))}
+          </ExecutiveListPanel>
+        </div>
       </section>
 
       <section className="glass-panel min-w-0 rounded-lg p-3">
@@ -629,6 +731,62 @@ function ChartEmptyState({ icon: Icon, message }: { icon: LucideIcon; message: s
         </div>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-app-muted">{message}</p>
       </div>
+    </div>
+  );
+}
+
+function ExecutiveSignalCard({
+  helper,
+  icon: Icon,
+  title,
+  tone,
+  value,
+}: {
+  helper: string;
+  icon: LucideIcon;
+  title: string;
+  tone: "danger" | "primary" | "success" | "warning";
+  value: string;
+}) {
+  const toneClass = {
+    danger: "border-app-danger/30 bg-app-danger/12 text-red-200",
+    primary: "border-app-primary/30 bg-app-primary/12 text-blue-200",
+    success: "border-app-success/30 bg-app-success/12 text-green-200",
+    warning: "border-app-warning/30 bg-app-warning/12 text-amber-200",
+  }[tone];
+
+  return (
+    <article className="min-w-0 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="flex items-start gap-3">
+        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border ${toneClass}`}>
+          <Icon size={18} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{title}</p>
+          <p className="mt-2 break-words text-base font-semibold text-white">{value}</p>
+          <p className="mt-1 text-sm leading-5 text-app-muted">{helper}</p>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ExecutiveListPanel({ children, count, title }: { children: ReactNode; count: number; title: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm font-semibold text-white">{title}</p>
+        <span className="w-fit rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-200">
+          {count} items
+        </span>
+      </div>
+      <ul className="mt-3 grid gap-2">
+        {count > 0 ? children : (
+          <li className="rounded-lg border border-dashed border-white/10 bg-slate-950/20 px-3 py-4 text-center text-sm leading-6 text-app-muted">
+            No items flagged for this scope.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
@@ -1008,6 +1166,211 @@ function readStoredFinanceTransactions() {
   } catch {
     return [];
   }
+}
+
+function buildExecutiveInsights(data: EventOSData, financeTransactions: FinanceTransactionRecord[], scopeLabel: string) {
+  const eventRiskItems = data.events
+    .filter((event) => !event.archived)
+    .map((event) => getExecutiveEventRisk(event, data, financeTransactions))
+    .sort((left, right) => right.riskScore - left.riskScore);
+  const topRiskEvents = eventRiskItems.filter((event) => event.riskScore >= 45).slice(0, 3);
+  const expectedRevenue = data.events.filter((event) => !event.archived).reduce((sum, event) => sum + event.expectedRevenue, 0);
+  const ticketRevenue = getTicketRevenue(data.events, data.ticketCategories);
+  const sponsorRevenue = getSponsorRevenue(data.sponsors);
+  const financeIncome = financeTransactions
+    .filter((transaction) => transaction.type === "Income")
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const recordedRevenue = Math.max(ticketRevenue + sponsorRevenue, financeIncome);
+  const revenueAtRisk = Math.max(expectedRevenue - recordedRevenue, 0);
+  const sponsorPipeline = getExecutiveSponsorPipeline(data.sponsors);
+  const criticalTasks = getExecutiveCriticalTasks(data.tasks);
+  const taskCompletion = data.tasks.length > 0
+    ? data.tasks.filter((task) => task.status === "Done").length / data.tasks.length
+    : 0.5;
+  const ticketInventory = getTicketInventory(data.events, data.ticketCategories);
+  const ticketSold = getTicketsSold(data.events, data.ticketCategories);
+  const ticketScore = ticketInventory > 0 ? Math.min(100, (ticketSold / ticketInventory) * 100) : (data.events.length > 0 ? 20 : 60);
+  const revenueScore = expectedRevenue > 0 ? Math.min(100, (recordedRevenue / expectedRevenue) * 100) : (data.events.length > 0 ? 45 : 70);
+  const taskScore = taskCompletion * 100;
+  const sponsorScore = sponsorPipeline.healthScore;
+  const riskPenalty = Math.min(35, topRiskEvents.length * 8 + criticalTasks.filter((task) => task.priority === "High").length * 3);
+  const healthScore = clampDashboardScore(Math.round((revenueScore * 0.32) + (ticketScore * 0.22) + (taskScore * 0.24) + (sponsorScore * 0.22) - riskPenalty));
+  const healthSummary = healthScore >= 75
+    ? `Workspace health is strong for ${scopeLabel}.`
+    : healthScore >= 50
+      ? `Workspace health needs attention in ${scopeLabel}.`
+      : `Workspace health is at risk in ${scopeLabel}.`;
+  const summary = buildExecutiveSummary({
+    criticalTasks,
+    healthScore,
+    revenueAtRisk,
+    scopeLabel,
+    sponsorPipeline,
+    ticketInventory,
+    ticketSold,
+    topRiskEvents,
+  });
+
+  return {
+    criticalTasks,
+    healthScore,
+    healthSummary,
+    revenueAtRisk,
+    sponsorPipeline,
+    summary,
+    topRiskEvents,
+  };
+}
+
+function getExecutiveEventRisk(event: EventOSData["events"][number], data: EventOSData, financeTransactions: FinanceTransactionRecord[]) {
+  const tickets = data.ticketCategories.filter((ticket) => ticket.eventId === event.id);
+  const sponsors = data.sponsors.filter((sponsor) => sponsor.eventId === event.id);
+  const tasks = data.tasks.filter((task) => task.eventId === event.id);
+  const ticketInventory = tickets.reduce((sum, ticket) => sum + ticket.inventory, 0);
+  const ticketsSold = tickets.reduce((sum, ticket) => sum + ticket.sold, 0);
+  const ticketSellThrough = ticketInventory > 0 ? ticketsSold / ticketInventory : 0;
+  const ticketRevenue = tickets.reduce((sum, ticket) => sum + ticket.sold * ticket.price, 0);
+  const sponsorRevenue = sponsors
+    .filter((sponsor) => sponsor.status === "Closed Won" && sponsor.paymentReceived)
+    .reduce((sum, sponsor) => sum + sponsor.sponsorshipAmount, 0);
+  const financeIncome = financeTransactions
+    .filter((transaction) => transaction.eventId === event.id && transaction.type === "Income")
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const recordedRevenue = Math.max(ticketRevenue + sponsorRevenue, financeIncome);
+  const revenueGap = Math.max(event.expectedRevenue - recordedRevenue, 0);
+  const overdueTasks = tasks.filter((task) => task.status !== "Done" && parseDashboardDate(task.dueDate).getTime() < startOfDashboardDay(new Date()).getTime()).length;
+  const highPriorityPending = tasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
+  const daysToEvent = Math.ceil((parseDashboardDate(event.date).getTime() - startOfDashboardDay(new Date()).getTime()) / (24 * 60 * 60 * 1000));
+  const reasons: string[] = [];
+  let riskScore = 0;
+
+  if (event.expectedRevenue > 0 && revenueGap > 0) {
+    riskScore += Math.min(35, (revenueGap / event.expectedRevenue) * 35);
+    reasons.push(`${formatCurrency(revenueGap)} revenue gap`);
+  }
+  if (ticketInventory === 0) {
+    riskScore += 25;
+    reasons.push("ticket setup missing");
+  } else if (ticketSellThrough < 0.25) {
+    riskScore += 18;
+    reasons.push("low ticket sell-through");
+  }
+  if (overdueTasks > 0) {
+    riskScore += Math.min(22, overdueTasks * 8);
+    reasons.push(`${formatNumber(overdueTasks)} overdue tasks`);
+  }
+  if (highPriorityPending > 0) {
+    riskScore += Math.min(20, highPriorityPending * 6);
+    reasons.push(`${formatNumber(highPriorityPending)} high-priority pending`);
+  }
+  if (sponsors.length === 0) {
+    riskScore += 10;
+    reasons.push("no sponsor pipeline");
+  }
+  if (daysToEvent >= 0 && daysToEvent <= 14 && event.status === "Planning") {
+    riskScore += 12;
+    reasons.push("near event date while still planning");
+  }
+
+  return {
+    id: event.id,
+    name: event.name,
+    reason: reasons.slice(0, 3).join(" • ") || "No major risk signals detected",
+    riskScore: clampDashboardScore(Math.round(riskScore)),
+  };
+}
+
+function getExecutiveSponsorPipeline(sponsors: EventOSData["sponsors"]) {
+  const activeDeals = sponsors.filter((sponsor) => !["Closed Won", "Closed Lost"].includes(sponsor.status)).length;
+  const wonDeals = sponsors.filter((sponsor) => sponsor.status === "Closed Won").length;
+  const lostDeals = sponsors.filter((sponsor) => sponsor.status === "Closed Lost").length;
+  const totalResolved = wonDeals + lostDeals;
+  const conversionRate = totalResolved > 0 ? Math.round((wonDeals / totalResolved) * 100) : 0;
+  const pipelineValue = getPipelineValue(sponsors);
+  const receivedValue = getSponsorRevenue(sponsors);
+  const healthScore = sponsors.length === 0
+    ? 35
+    : clampDashboardScore(Math.round((conversionRate * 0.45) + (activeDeals > 0 ? 30 : 10) + (receivedValue > 0 ? 25 : pipelineValue > 0 ? 15 : 0)));
+
+  return {
+    activeDeals,
+    conversionRate,
+    healthScore,
+    pipelineValue,
+    receivedValue,
+    tone: healthScore >= 70 ? "success" as const : healthScore >= 45 ? "warning" as const : "danger" as const,
+    wonDeals,
+  };
+}
+
+function getExecutiveCriticalTasks(tasks: EventOSData["tasks"]) {
+  const today = startOfDashboardDay(new Date());
+  return [...tasks]
+    .filter((task) => task.status !== "Done")
+    .sort((left, right) => {
+      const leftOverdue = parseDashboardDate(left.dueDate).getTime() < today.getTime() ? 0 : 1;
+      const rightOverdue = parseDashboardDate(right.dueDate).getTime() < today.getTime() ? 0 : 1;
+      if (leftOverdue !== rightOverdue) return leftOverdue - rightOverdue;
+      if (left.priority !== right.priority) return priorityWeight(left.priority) - priorityWeight(right.priority);
+      return left.dueDate.localeCompare(right.dueDate);
+    })
+    .slice(0, 5);
+}
+
+function buildExecutiveSummary({
+  criticalTasks,
+  healthScore,
+  revenueAtRisk,
+  scopeLabel,
+  sponsorPipeline,
+  ticketInventory,
+  ticketSold,
+  topRiskEvents,
+}: {
+  criticalTasks: EventOSData["tasks"];
+  healthScore: number;
+  revenueAtRisk: number;
+  scopeLabel: string;
+  sponsorPipeline: ReturnType<typeof getExecutiveSponsorPipeline>;
+  ticketInventory: number;
+  ticketSold: number;
+  topRiskEvents: Array<{ id: string; name: string; reason: string; riskScore: number }>;
+}) {
+  const summary: string[] = [];
+
+  summary.push(healthScore >= 75
+    ? `${scopeLabel} is operating in a healthy range.`
+    : healthScore >= 50
+      ? `${scopeLabel} is stable but needs focused follow-up.`
+      : `${scopeLabel} needs executive attention before the next review.`);
+  if (revenueAtRisk > 0) summary.push(`${formatCurrency(revenueAtRisk)} revenue is currently at risk against expected event targets.`);
+  if (ticketInventory > 0) summary.push(`${formatNumber(ticketSold)} of ${formatNumber(ticketInventory)} tickets are sold across the selected scope.`);
+  if (sponsorPipeline.activeDeals > 0) summary.push(`${formatNumber(sponsorPipeline.activeDeals)} sponsor deals are still active in the pipeline.`);
+  if (criticalTasks.length > 0) summary.push(`${formatNumber(criticalTasks.length)} critical task ${criticalTasks.length === 1 ? "item needs" : "items need"} near-term attention.`);
+  if (topRiskEvents.length > 0) summary.push(`${topRiskEvents[0].name} is the highest-risk event right now.`);
+
+  return summary.slice(0, 6);
+}
+
+function priorityWeight(priority: TaskPriority) {
+  return priority === "High" ? 0 : priority === "Medium" ? 1 : 2;
+}
+
+function clampDashboardScore(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function startOfDashboardDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function parseDashboardDate(value: string) {
+  if (!value) return new Date(8640000000000000);
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return new Date(value);
+  return startOfDashboardDay(new Date(year, month - 1, day));
 }
 
 function buildCalendar(data: EventOSData) {
