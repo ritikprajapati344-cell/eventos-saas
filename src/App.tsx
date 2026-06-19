@@ -124,6 +124,7 @@ function AuthenticatedApp() {
               activitiesData={activitiesData}
               data={data}
               eventsData={eventsData}
+              financeTransactions={financeData.transactions}
               setData={setData}
               tasksData={tasksData}
               ticketingData={ticketingData}

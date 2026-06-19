@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, FilePlus2, MapPin, Plus, RefreshCw, ShieldAlert, Sparkles, Ticket, Trash2, TrendingUp, X } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
@@ -6,7 +6,9 @@ import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
+import { buildExecutiveInsights } from "../intelligence/executiveSummary";
 import { generateAIEventPlan, type AICenterBackendMode, type AIEventPlan } from "../lib/aiCenterClient";
+import type { FinanceTransactionRecord } from "../lib/financeTransactionsRepository";
 import type { EventItem, EventOSData, EventType, Task, TicketCategory } from "../types";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
@@ -36,6 +38,7 @@ interface AICenterProps {
   activitiesData: ActivitiesDataSource;
   data: EventOSData;
   eventsData: EventsDataSource;
+  financeTransactions: FinanceTransactionRecord[];
   setData: Dispatch<SetStateAction<EventOSData>>;
   tasksData: TasksDataSource;
   ticketingData: TicketingDataSource;
@@ -68,6 +71,7 @@ export default function AICenter({
   activitiesData,
   data,
   eventsData,
+  financeTransactions,
   setData,
   tasksData,
   ticketingData,
@@ -89,6 +93,10 @@ export default function AICenter({
   const [draft, setDraft] = useState<EditableDraft | null>(null);
   const [toast, setToast] = useState("");
   const [createdDraftSignature, setCreatedDraftSignature] = useState("");
+  const workspaceInsights = useMemo(
+    () => buildExecutiveInsights(data, financeTransactions, "the workspace"),
+    [data, financeTransactions],
+  );
 
   const showToast = (message: string) => {
     setToast(message);
@@ -271,6 +279,8 @@ export default function AICenter({
         title="AI Command Center"
         description="Plan events faster with AI-powered event strategy."
       />
+
+      <WorkspaceIntelligence insights={workspaceInsights} />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -456,6 +466,149 @@ function Capability({
         </div>
       </div>
     </div>
+  );
+}
+
+function WorkspaceIntelligence({ insights }: { insights: ReturnType<typeof buildExecutiveInsights> }) {
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Workspace Intelligence</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">AI workspace command view</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Read-only executive intelligence from current EventOS workspace data.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-app-primary/30 bg-app-primary/10 px-3 py-1 text-xs font-medium text-blue-100">
+          No records are created
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <WorkspaceMetric
+          helper={insights.healthSummary}
+          icon={Sparkles}
+          title="Workspace Health Score"
+          tone={insights.healthScore >= 75 ? "success" : insights.healthScore >= 50 ? "warning" : "danger"}
+          value={`${insights.healthScore}/100`}
+        />
+        <WorkspaceMetric
+          helper="Expected event revenue not yet covered by current signals"
+          icon={TrendingUp}
+          title="Revenue At Risk"
+          tone={insights.revenueAtRisk > 0 ? "warning" : "success"}
+          value={formatCurrency(insights.revenueAtRisk)}
+        />
+        <WorkspaceMetric
+          helper={`${formatNumber(insights.sponsorPipeline.activeDeals)} active deals, ${formatNumber(insights.sponsorPipeline.conversionRate)}% conversion`}
+          icon={BriefcaseBusiness}
+          title="Sponsor Pipeline Health"
+          tone={insights.sponsorPipeline.tone}
+          value={`${insights.sponsorPipeline.healthScore}/100`}
+        />
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <WorkspaceList title="Top Risk Events" count={insights.topRiskEvents.length}>
+          {insights.topRiskEvents.length === 0 ? (
+            <WorkspaceEmpty text="No high-risk events flagged." />
+          ) : insights.topRiskEvents.map((event) => (
+            <li key={event.id} className="rounded-lg border border-white/10 bg-slate-950/30 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 break-words text-sm font-medium text-white">{event.name}</p>
+                <span className={`shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${event.riskScore >= 70 ? "border-app-danger/30 bg-app-danger/12 text-red-100" : "border-app-warning/30 bg-app-warning/12 text-amber-100"}`}>
+                  {event.riskScore}
+                </span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-app-muted">{event.reason}</p>
+            </li>
+          ))}
+        </WorkspaceList>
+
+        <WorkspaceList title="Upcoming Critical Tasks" count={insights.criticalTasks.length}>
+          {insights.criticalTasks.length === 0 ? (
+            <WorkspaceEmpty text="No upcoming critical tasks flagged." />
+          ) : insights.criticalTasks.map((task) => (
+            <li key={task.id} className="rounded-lg border border-white/10 bg-slate-950/30 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 break-words text-sm font-medium text-white">{task.title}</p>
+                <span className={`shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${task.priority === "High" ? "border-app-danger/30 bg-app-danger/12 text-red-100" : task.priority === "Medium" ? "border-app-warning/30 bg-app-warning/12 text-amber-100" : "border-app-success/30 bg-app-success/12 text-green-100"}`}>
+                  {task.priority}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-app-muted">Due {task.dueDate} - {task.status}</p>
+            </li>
+          ))}
+        </WorkspaceList>
+
+        <WorkspaceList title="AI Executive Summary" count={insights.summary.length}>
+          {insights.summary.length === 0 ? (
+            <WorkspaceEmpty text="No executive summary signals yet." />
+          ) : insights.summary.map((item) => (
+            <li key={item} className="flex gap-2 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-primary" />
+              <span className="min-w-0 break-words">{item}</span>
+            </li>
+          ))}
+        </WorkspaceList>
+      </div>
+    </section>
+  );
+}
+
+function WorkspaceMetric({
+  helper,
+  icon: Icon,
+  title,
+  tone,
+  value,
+}: {
+  helper: string;
+  icon: typeof Sparkles;
+  title: string;
+  tone: "danger" | "success" | "warning";
+  value: string;
+}) {
+  const toneClass = tone === "success"
+    ? "border-app-success/25 bg-app-success/10 text-green-100"
+    : tone === "warning"
+      ? "border-app-warning/25 bg-app-warning/10 text-amber-100"
+      : "border-app-danger/25 bg-app-danger/10 text-red-100";
+
+  return (
+    <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="flex items-start gap-3">
+        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border ${toneClass}`}>
+          <Icon size={18} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{title}</p>
+          <p className="mt-2 break-words text-2xl font-semibold text-white">{value}</p>
+          <p className="mt-2 text-sm leading-5 text-app-muted">{helper}</p>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function WorkspaceList({ children, count, title }: { children: ReactNode; count: number; title: string }) {
+  return (
+    <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{title}</p>
+        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-xs text-slate-200">{formatNumber(count)}</span>
+      </div>
+      <ul className="mt-3 space-y-2">{children}</ul>
+    </article>
+  );
+}
+
+function WorkspaceEmpty({ text }: { text: string }) {
+  return (
+    <li className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-3 text-sm text-app-muted">
+      {text}
+    </li>
   );
 }
 
