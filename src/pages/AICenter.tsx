@@ -92,10 +92,12 @@ interface AIExecutionHistoryEntry {
   createdAt: string;
   id: string;
   source: "AI Center";
-  status: "Success";
+  status: "Success" | "Undone";
   targetEvent: string;
   taskCount: number;
+  taskIds?: string[];
   taskTitles: string[];
+  undoneAt?: string;
 }
 
 export default function AICenter({
@@ -135,6 +137,10 @@ export default function AICenter({
   const [taskCreateError, setTaskCreateError] = useState("");
   const [taskCreateMessage, setTaskCreateMessage] = useState("");
   const [executionHistory, setExecutionHistory] = useState<AIExecutionHistoryEntry[]>(loadExecutionHistory);
+  const [undoExecutionId, setUndoExecutionId] = useState("");
+  const [isUndoingTasks, setIsUndoingTasks] = useState(false);
+  const [taskUndoError, setTaskUndoError] = useState("");
+  const [taskUndoMessage, setTaskUndoMessage] = useState("");
   const workspaceInsights = useMemo(
     () => buildExecutiveInsights(data, financeTransactions, "the workspace"),
     [data, financeTransactions],
@@ -293,6 +299,85 @@ export default function AICenter({
     setShowTaskCreateConfirm(false);
   };
 
+  const openUndoExecutionConfirm = (entryId: string) => {
+    setTaskUndoError("");
+    setTaskUndoMessage("");
+
+    const entry = executionHistory.find((historyEntry) => historyEntry.id === entryId);
+    if (!entry) {
+      setTaskUndoError("Unable to find this execution history entry.");
+      return;
+    }
+
+    if (entry.status === "Undone") {
+      setTaskUndoError("This AI execution has already been undone.");
+      return;
+    }
+
+    if (!entry.taskIds || entry.taskIds.length === 0) {
+      setTaskUndoError("Undo unavailable for this older entry.");
+      return;
+    }
+
+    setUndoExecutionId(entryId);
+  };
+
+  const cancelUndoExecution = () => {
+    if (isUndoingTasks) return;
+    setTaskUndoError("");
+    setUndoExecutionId("");
+  };
+
+  const undoExecutionTasks = async () => {
+    if (isUndoingTasks) return;
+
+    const entry = executionHistory.find((historyEntry) => historyEntry.id === undoExecutionId);
+    if (!entry) {
+      setTaskUndoError("Unable to find this execution history entry.");
+      return;
+    }
+
+    if (entry.status === "Undone") {
+      setTaskUndoError("This AI execution has already been undone.");
+      return;
+    }
+
+    if (!entry.taskIds || entry.taskIds.length === 0) {
+      setTaskUndoError("Undo unavailable for this older entry.");
+      return;
+    }
+
+    setIsUndoingTasks(true);
+    setTaskUndoError("");
+    setTaskUndoMessage("");
+
+    try {
+      if (tasksData.isSupabaseMode) {
+        for (const taskId of entry.taskIds) {
+          await tasksData.deleteTask(taskId);
+        }
+      } else {
+        const taskIdsToRemove = new Set(entry.taskIds);
+        setData((current) => ({
+          ...current,
+          tasks: current.tasks.filter((task) => !taskIdsToRemove.has(task.id)),
+        }));
+      }
+
+      setExecutionHistory((current) => current.map((historyEntry) => (
+        historyEntry.id === entry.id
+          ? { ...historyEntry, status: "Undone", undoneAt: new Date().toISOString() }
+          : historyEntry
+      )));
+      setTaskUndoMessage(`${entry.taskIds.length} AI-created tasks undone successfully.`);
+      setUndoExecutionId("");
+    } catch (error) {
+      setTaskUndoError(getErrorMessage(error, "Unable to undo AI-created tasks."));
+    } finally {
+      setIsUndoingTasks(false);
+    }
+  };
+
   const createApprovedTasks = async () => {
     if (isCreatingTasks) return;
 
@@ -361,6 +446,7 @@ export default function AICenter({
           status: "Success",
           targetEvent: selectedEvent.name,
           taskCount: createdTasks.length,
+          taskIds: createdTasks.map((task) => task.id),
           taskTitles: createdTasks.map((task) => task.title),
         },
         ...current,
@@ -523,7 +609,13 @@ export default function AICenter({
         selectedEventId={executionEventId}
       />
 
-      <ExecutionHistory history={executionHistory} />
+      <ExecutionHistory
+        error={taskUndoError}
+        history={executionHistory}
+        message={taskUndoMessage}
+        onUndo={openUndoExecutionConfirm}
+        undoingEntryId={isUndoingTasks ? undoExecutionId : ""}
+      />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -686,6 +778,15 @@ export default function AICenter({
           isCreating={isCreatingTasks}
           onCancel={cancelTaskCreate}
           onConfirm={() => void createApprovedTasks()}
+        />
+      )}
+
+      {undoExecutionId && (
+        <ConfirmUndoTasksModal
+          entry={executionHistory.find((historyEntry) => historyEntry.id === undoExecutionId)}
+          isUndoing={isUndoingTasks}
+          onCancel={cancelUndoExecution}
+          onConfirm={() => void undoExecutionTasks()}
         />
       )}
 
@@ -1156,7 +1257,19 @@ function ExecutionPreview({
   );
 }
 
-function ExecutionHistory({ history }: { history: AIExecutionHistoryEntry[] }) {
+function ExecutionHistory({
+  error,
+  history,
+  message,
+  onUndo,
+  undoingEntryId,
+}: {
+  error: string;
+  history: AIExecutionHistoryEntry[];
+  message: string;
+  onUndo: (entryId: string) => void;
+  undoingEntryId: string;
+}) {
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1172,6 +1285,12 @@ function ExecutionHistory({ history }: { history: AIExecutionHistoryEntry[] }) {
         </span>
       </div>
 
+      {(message || error) && (
+        <p className={`mt-5 rounded-lg border px-3 py-2 text-sm ${message ? "border-app-success/30 bg-app-success/10 text-green-100" : "border-app-danger/30 bg-app-danger/10 text-red-100"}`}>
+          {message || error}
+        </p>
+      )}
+
       {history.length === 0 ? (
         <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
           No task execution history yet. Create tasks from approved drafts to see audit entries here.
@@ -1180,10 +1299,16 @@ function ExecutionHistory({ history }: { history: AIExecutionHistoryEntry[] }) {
         <div className="mt-5 space-y-3">
           {history.map((entry) => (
             <article key={entry.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              {(() => {
+                const canUndo = entry.status === "Success" && Boolean(entry.taskIds?.length);
+                const isOlderEntry = entry.status === "Success" && !entry.taskIds?.length;
+                const isUndoing = undoingEntryId === entry.id;
+                return (
+                  <>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full border border-app-success/30 bg-app-success/12 px-2.5 py-1 text-xs font-semibold text-green-100">
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${entry.status === "Undone" ? "border-app-warning/30 bg-app-warning/12 text-amber-100" : "border-app-success/30 bg-app-success/12 text-green-100"}`}>
                       Status: {entry.status}
                     </span>
                     <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
@@ -1197,6 +1322,24 @@ function ExecutionHistory({ history }: { history: AIExecutionHistoryEntry[] }) {
                   {formatExecutionHistoryTime(entry.createdAt)} session
                 </div>
               </div>
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                {isOlderEntry ? (
+                  <p className="text-sm text-app-muted">Undo unavailable for this older entry.</p>
+                ) : entry.status === "Undone" ? (
+                  <p className="text-sm text-app-muted">This AI execution has already been undone.</p>
+                ) : (
+                  <p className="text-sm text-app-muted">Undo removes only the tasks created by this execution.</p>
+                )}
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 text-sm font-medium text-red-100 transition hover:bg-app-danger/15 focus:outline-none focus:ring-2 focus:ring-app-danger/35 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!canUndo || isUndoing}
+                  onClick={() => onUndo(entry.id)}
+                  type="button"
+                >
+                  <Trash2 size={16} />
+                  {isUndoing ? "Undoing..." : canUndo ? "Undo Tasks" : "Undo unavailable"}
+                </button>
+              </div>
               <div className="mt-4">
                 <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Task titles created</p>
                 <ul className="mt-2 space-y-2">
@@ -1208,6 +1351,9 @@ function ExecutionHistory({ history }: { history: AIExecutionHistoryEntry[] }) {
                   ))}
                 </ul>
               </div>
+                  </>
+                );
+              })()}
             </article>
           ))}
         </div>
@@ -1384,11 +1530,13 @@ function isExecutionHistoryEntry(value: unknown): value is AIExecutionHistoryEnt
     typeof entry.createdAt === "string"
     && typeof entry.id === "string"
     && entry.source === "AI Center"
-    && entry.status === "Success"
+    && (entry.status === "Success" || entry.status === "Undone")
     && typeof entry.targetEvent === "string"
     && typeof entry.taskCount === "number"
     && Array.isArray(entry.taskTitles)
     && entry.taskTitles.every((title) => typeof title === "string")
+    && (!entry.taskIds || entry.taskIds.every((taskId) => typeof taskId === "string"))
+    && (!entry.undoneAt || typeof entry.undoneAt === "string")
   );
 }
 
@@ -1802,6 +1950,67 @@ function ConfirmCreateTasksModal({
           >
             <CalendarCheck2 size={17} />
             {isCreating ? "Creating..." : "Create Tasks"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmUndoTasksModal({
+  entry,
+  isUndoing,
+  onCancel,
+  onConfirm,
+}: {
+  entry?: AIExecutionHistoryEntry;
+  isUndoing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!entry) return null;
+
+  const taskCount = entry.taskIds?.length ?? entry.taskCount;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-xl border border-white/10 bg-slate-900 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-danger">Confirm undo</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">
+              You are about to undo this AI execution and remove {formatNumber(taskCount)} created tasks.
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-app-muted">
+              EventOS will remove only the tasks recorded in this AI execution history entry for {entry.targetEvent}.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/[0.08]"
+            disabled={isUndoing}
+            onClick={onCancel}
+            type="button"
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex h-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-100 transition hover:border-white/20 hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isUndoing}
+            onClick={onCancel}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-danger px-4 text-sm font-medium text-white shadow-glow transition hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-app-danger/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isUndoing}
+            onClick={onConfirm}
+            type="button"
+          >
+            <Trash2 size={17} />
+            {isUndoing ? "Undoing..." : "Undo Tasks"}
           </button>
         </div>
       </div>
