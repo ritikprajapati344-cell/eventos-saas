@@ -77,6 +77,14 @@ interface AIActionProposal {
   title: string;
 }
 
+interface AITaskDraft {
+  description: string;
+  dueDate: string;
+  priority: "High" | "Medium" | "Low";
+  sourceProposal: string;
+  title: string;
+}
+
 export default function AICenter({
   activitiesData,
   data,
@@ -127,6 +135,14 @@ export default function AICenter({
   const actionProposals = useMemo(
     () => buildAIActionProposals(workspaceInsights, eventAnalysis, analyzedEvent),
     [workspaceInsights, eventAnalysis, analyzedEvent],
+  );
+  const approvedActionProposals = useMemo(
+    () => actionProposals.filter((proposal) => approvedProposalIds.includes(proposal.id)),
+    [actionProposals, approvedProposalIds],
+  );
+  const executionDrafts = useMemo(
+    () => buildExecutionTaskDrafts(approvedActionProposals),
+    [approvedActionProposals],
   );
 
   useEffect(() => {
@@ -343,6 +359,8 @@ export default function AICenter({
         proposals={actionProposals}
         selectedProposalIds={selectedProposalIds}
       />
+
+      <ExecutionPreview drafts={executionDrafts} />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -846,6 +864,78 @@ function AIActionProposals({
   );
 }
 
+function ExecutionPreview({ drafts }: { drafts: AITaskDraft[] }) {
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Execution Preview</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Task drafts from approved proposals</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Draft-only execution preview. These items are generated only from approved AI Action Proposals.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+          <button
+            className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-400 opacity-70"
+            disabled
+            type="button"
+          >
+            <CalendarCheck2 size={16} />
+            Create Tasks
+          </button>
+          <p className="text-xs text-app-muted">Task creation will be enabled in Sprint 18E.2</p>
+        </div>
+      </div>
+
+      {drafts.length === 0 ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          Approve one or more AI Action Proposals to preview task drafts here.
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {drafts.map((draft) => (
+            <article key={`${draft.sourceProposal}-${draft.title}`} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
+                  {draft.priority} priority
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-300">
+                  Draft Only
+                </span>
+              </div>
+              <dl className="mt-4 space-y-3">
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Draft Title</dt>
+                  <dd className="mt-1 break-words text-base font-semibold text-white">{draft.title}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Draft Description</dt>
+                  <dd className="mt-1 break-words text-sm leading-6 text-slate-200">{draft.description}</dd>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Priority</dt>
+                    <dd className="mt-1 text-sm font-medium text-white">{draft.priority}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Due Date</dt>
+                    <dd className="mt-1 text-sm font-medium text-white">{draft.dueDate}</dd>
+                  </div>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Source Proposal</dt>
+                  <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceProposal}</dd>
+                </div>
+              </dl>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WorkspaceMetric({
   helper,
   icon: Icon,
@@ -954,6 +1044,23 @@ function getProposalImpactClass(impact: AIActionProposal["impact"]) {
   if (impact === "High") return "border-app-danger/30 bg-app-danger/12 text-red-100";
   if (impact === "Medium") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
   return "border-app-success/30 bg-app-success/12 text-green-100";
+}
+
+function buildExecutionTaskDrafts(proposals: AIActionProposal[]): AITaskDraft[] {
+  return proposals.map((proposal) => ({
+    description: proposal.reason,
+    dueDate: getSuggestedDraftDueDate(proposal.impact),
+    priority: proposal.impact,
+    sourceProposal: proposal.title,
+    title: proposal.title,
+  }));
+}
+
+function getSuggestedDraftDueDate(impact: AIActionProposal["impact"]) {
+  const dueDate = new Date();
+  const daysToAdd = impact === "High" ? 3 : impact === "Medium" ? 7 : 14;
+  dueDate.setDate(dueDate.getDate() + daysToAdd);
+  return dueDate.toISOString().slice(0, 10);
 }
 
 function WorkspaceList({ children, count, title }: { children: ReactNode; count: number; title: string }) {
