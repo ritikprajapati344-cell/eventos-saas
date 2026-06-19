@@ -86,6 +86,16 @@ interface AITaskDraft {
   title: string;
 }
 
+interface AIExecutionHistoryEntry {
+  createdAt: string;
+  id: string;
+  source: "AI Center";
+  status: "Success";
+  targetEvent: string;
+  taskCount: number;
+  taskTitles: string[];
+}
+
 export default function AICenter({
   activitiesData,
   data,
@@ -122,6 +132,7 @@ export default function AICenter({
   const [isCreatingTasks, setIsCreatingTasks] = useState(false);
   const [taskCreateError, setTaskCreateError] = useState("");
   const [taskCreateMessage, setTaskCreateMessage] = useState("");
+  const [executionHistory, setExecutionHistory] = useState<AIExecutionHistoryEntry[]>([]);
   const workspaceInsights = useMemo(
     () => buildExecutiveInsights(data, financeTransactions, "the workspace"),
     [data, financeTransactions],
@@ -336,6 +347,18 @@ export default function AICenter({
         ...current,
         ...successfulDraftIds,
       ])));
+      setExecutionHistory((current) => [
+        {
+          createdAt: new Date().toISOString(),
+          id: `execution-${Date.now()}`,
+          source: "AI Center",
+          status: "Success",
+          targetEvent: selectedEvent.name,
+          taskCount: createdTasks.length,
+          taskTitles: createdTasks.map((task) => task.title),
+        },
+        ...current,
+      ]);
       setTaskCreateMessage(`${createdTasks.length} tasks created successfully.`);
       setShowTaskCreateConfirm(false);
     } catch (error) {
@@ -493,6 +516,8 @@ export default function AICenter({
         onCreateTasks={openTaskCreateConfirm}
         selectedEventId={executionEventId}
       />
+
+      <ExecutionHistory history={executionHistory} />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -1125,6 +1150,65 @@ function ExecutionPreview({
   );
 }
 
+function ExecutionHistory({ history }: { history: AIExecutionHistoryEntry[] }) {
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Execution History</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">AI task execution audit trail</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Local session history for tasks created from approved AI drafts. No separate audit table is created.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+          Local session only
+        </span>
+      </div>
+
+      {history.length === 0 ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          No task execution history yet. Create tasks from approved drafts to see audit entries here.
+        </div>
+      ) : (
+        <div className="mt-5 space-y-3">
+          {history.map((entry) => (
+            <article key={entry.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-app-success/30 bg-app-success/12 px-2.5 py-1 text-xs font-semibold text-green-100">
+                      Status: {entry.status}
+                    </span>
+                    <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                      Source: {entry.source}
+                    </span>
+                  </div>
+                  <h3 className="mt-3 break-words text-base font-semibold text-white">{entry.targetEvent}</h3>
+                  <p className="mt-1 text-sm text-app-muted">{formatNumber(entry.taskCount)} tasks created</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2 text-sm text-slate-200">
+                  {formatExecutionHistoryTime(entry.createdAt)} session
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Task titles created</p>
+                <ul className="mt-2 space-y-2">
+                  {entry.taskTitles.map((title) => (
+                    <li key={title} className="flex gap-2 text-sm leading-6 text-slate-200">
+                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-success" />
+                      <span className="min-w-0 break-words">{title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 function WorkspaceMetric({
   helper,
   icon: Icon,
@@ -1251,6 +1335,13 @@ function getSuggestedDraftDueDate(impact: AIActionProposal["impact"]) {
   const daysToAdd = impact === "High" ? 3 : impact === "Medium" ? 7 : 14;
   dueDate.setDate(dueDate.getDate() + daysToAdd);
   return dueDate.toISOString().slice(0, 10);
+}
+
+function formatExecutionHistoryTime(createdAt: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(createdAt));
 }
 
 function WorkspaceList({ children, count, title }: { children: ReactNode; count: number; title: string }) {
@@ -2100,3 +2191,5 @@ function getErrorMessage(error: unknown, fallback: string) {
   }
   return fallback;
 }
+
+
