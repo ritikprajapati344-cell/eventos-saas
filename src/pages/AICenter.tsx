@@ -80,6 +80,7 @@ interface AIActionProposal {
 interface AITaskDraft {
   description: string;
   dueDate: string;
+  id: string;
   priority: "High" | "Medium" | "Low";
   sourceProposal: string;
   title: string;
@@ -115,6 +116,12 @@ export default function AICenter({
   const [analyzedEventId, setAnalyzedEventId] = useState("");
   const [selectedProposalIds, setSelectedProposalIds] = useState<string[]>([]);
   const [approvedProposalIds, setApprovedProposalIds] = useState<string[]>([]);
+  const [createdExecutionDraftIds, setCreatedExecutionDraftIds] = useState<string[]>([]);
+  const [executionEventId, setExecutionEventId] = useState("");
+  const [showTaskCreateConfirm, setShowTaskCreateConfirm] = useState(false);
+  const [isCreatingTasks, setIsCreatingTasks] = useState(false);
+  const [taskCreateError, setTaskCreateError] = useState("");
+  const [taskCreateMessage, setTaskCreateMessage] = useState("");
   const workspaceInsights = useMemo(
     () => buildExecutiveInsights(data, financeTransactions, "the workspace"),
     [data, financeTransactions],
@@ -144,12 +151,29 @@ export default function AICenter({
     () => buildExecutionTaskDrafts(approvedActionProposals),
     [approvedActionProposals],
   );
+  const creatableExecutionDrafts = useMemo(
+    () => executionDrafts.filter((draft) => !createdExecutionDraftIds.includes(draft.id)),
+    [createdExecutionDraftIds, executionDrafts],
+  );
 
   useEffect(() => {
     const activeProposalIds = new Set(actionProposals.map((proposal) => proposal.id));
     setSelectedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
     setApprovedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
+    setCreatedExecutionDraftIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
   }, [actionProposals]);
+
+  useEffect(() => {
+    if (data.events.length === 0) {
+      setExecutionEventId("");
+      return;
+    }
+
+    const preferredEventId = analyzedEventId || data.events[0]?.id || "";
+    setExecutionEventId((current) => (
+      current && data.events.some((event) => event.id === current) ? current : preferredEventId
+    ));
+  }, [analyzedEventId, data.events]);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -227,6 +251,104 @@ export default function AICenter({
     setCreateError("");
     setCreateSummary("");
     setShowCreateModal(false);
+  };
+
+  const openTaskCreateConfirm = () => {
+    setTaskCreateError("");
+    setTaskCreateMessage("");
+
+    if (creatableExecutionDrafts.length === 0) {
+      setTaskCreateError("There are no new approved task drafts to create.");
+      return;
+    }
+
+    if (!executionEventId) {
+      setTaskCreateError("Select an event before creating tasks.");
+      return;
+    }
+
+    setShowTaskCreateConfirm(true);
+  };
+
+  const cancelTaskCreate = () => {
+    if (isCreatingTasks) return;
+    setTaskCreateError("");
+    setShowTaskCreateConfirm(false);
+  };
+
+  const createApprovedTasks = async () => {
+    if (isCreatingTasks) return;
+
+    const selectedEvent = data.events.find((event) => event.id === executionEventId);
+    if (!selectedEvent) {
+      setTaskCreateError("Select an event before creating tasks.");
+      return;
+    }
+
+    if (creatableExecutionDrafts.length === 0) {
+      setTaskCreateError("There are no new approved task drafts to create.");
+      return;
+    }
+
+    setIsCreatingTasks(true);
+    setTaskCreateError("");
+    setTaskCreateMessage("");
+
+    const successfulDraftIds: string[] = [];
+
+    try {
+      const createdTasks: Task[] = [];
+
+      if (tasksData.isSupabaseMode) {
+        for (const draft of creatableExecutionDrafts) {
+          const createdTask = await tasksData.createTask({
+            dueDate: draft.dueDate,
+            eventId: selectedEvent.id,
+            owner: "AI Center",
+            priority: draft.priority,
+            status: "Open",
+            title: draft.title,
+          });
+          createdTasks.push(createdTask);
+          successfulDraftIds.push(draft.id);
+        }
+      } else {
+        const idSeed = Date.now();
+        const localTasks: Task[] = creatableExecutionDrafts.map((draft, index) => ({
+          dueDate: draft.dueDate,
+          eventId: selectedEvent.id,
+          id: `ai-execution-task-${idSeed}-${index}`,
+          owner: "AI Center",
+          priority: draft.priority,
+          status: "Open",
+          title: draft.title,
+        }));
+
+        setData((current) => ({
+          ...current,
+          tasks: [...localTasks, ...current.tasks],
+        }));
+        createdTasks.push(...localTasks);
+        successfulDraftIds.push(...creatableExecutionDrafts.map((draft) => draft.id));
+      }
+
+      setCreatedExecutionDraftIds((current) => Array.from(new Set([
+        ...current,
+        ...successfulDraftIds,
+      ])));
+      setTaskCreateMessage(`${createdTasks.length} tasks created successfully.`);
+      setShowTaskCreateConfirm(false);
+    } catch (error) {
+      if (successfulDraftIds.length > 0) {
+        setCreatedExecutionDraftIds((current) => Array.from(new Set([
+          ...current,
+          ...successfulDraftIds,
+        ])));
+      }
+      setTaskCreateError(getErrorMessage(error, "Unable to create tasks from approved drafts."));
+    } finally {
+      setIsCreatingTasks(false);
+    }
   };
 
   const approveAndCreateEvent = async () => {
@@ -360,7 +482,17 @@ export default function AICenter({
         selectedProposalIds={selectedProposalIds}
       />
 
-      <ExecutionPreview drafts={executionDrafts} />
+      <ExecutionPreview
+        createdDraftIds={createdExecutionDraftIds}
+        drafts={executionDrafts}
+        error={taskCreateError}
+        events={data.events}
+        isCreating={isCreatingTasks}
+        message={taskCreateMessage}
+        onChangeEvent={setExecutionEventId}
+        onCreateTasks={openTaskCreateConfirm}
+        selectedEventId={executionEventId}
+      />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -513,6 +645,16 @@ export default function AICenter({
           onCancel={cancelCreate}
           onConfirm={() => void approveAndCreateEvent()}
           draft={draft}
+        />
+      )}
+
+      {showTaskCreateConfirm && (
+        <ConfirmCreateTasksModal
+          draftCount={creatableExecutionDrafts.length}
+          eventName={data.events.find((event) => event.id === executionEventId)?.name ?? "selected event"}
+          isCreating={isCreatingTasks}
+          onCancel={cancelTaskCreate}
+          onConfirm={() => void createApprovedTasks()}
         />
       )}
 
@@ -864,7 +1006,29 @@ function AIActionProposals({
   );
 }
 
-function ExecutionPreview({ drafts }: { drafts: AITaskDraft[] }) {
+function ExecutionPreview({
+  createdDraftIds,
+  drafts,
+  error,
+  events,
+  isCreating,
+  message,
+  onChangeEvent,
+  onCreateTasks,
+  selectedEventId,
+}: {
+  createdDraftIds: string[];
+  drafts: AITaskDraft[];
+  error: string;
+  events: EventItem[];
+  isCreating: boolean;
+  message: string;
+  onChangeEvent: (eventId: string) => void;
+  onCreateTasks: () => void;
+  selectedEventId: string;
+}) {
+  const pendingDrafts = drafts.filter((draft) => !createdDraftIds.includes(draft.id));
+
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -876,17 +1040,35 @@ function ExecutionPreview({ drafts }: { drafts: AITaskDraft[] }) {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+          <select
+            className="dashboard-input h-10 min-w-0 sm:w-64"
+            disabled={events.length === 0 || isCreating}
+            onChange={(event) => onChangeEvent(event.target.value)}
+            value={selectedEventId}
+          >
+            {events.length === 0 ? (
+              <option value="">No events available</option>
+            ) : events.map((event) => (
+              <option key={event.id} value={event.id}>{event.name}</option>
+            ))}
+          </select>
           <button
-            className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-400 opacity-70"
-            disabled
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-app-primary px-3 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={pendingDrafts.length === 0 || !selectedEventId || isCreating}
+            onClick={onCreateTasks}
             type="button"
           >
             <CalendarCheck2 size={16} />
-            Create Tasks
+            {isCreating ? "Creating..." : "Create Tasks"}
           </button>
-          <p className="text-xs text-app-muted">Task creation will be enabled in Sprint 18E.2</p>
         </div>
       </div>
+
+      {(message || error) && (
+        <p className={`mt-5 rounded-lg border px-3 py-2 text-sm ${message ? "border-app-success/30 bg-app-success/10 text-green-100" : "border-app-danger/30 bg-app-danger/10 text-red-100"}`}>
+          {message || error}
+        </p>
+      )}
 
       {drafts.length === 0 ? (
         <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
@@ -896,12 +1078,16 @@ function ExecutionPreview({ drafts }: { drafts: AITaskDraft[] }) {
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {drafts.map((draft) => (
             <article key={`${draft.sourceProposal}-${draft.title}`} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              {(() => {
+                const isCreated = createdDraftIds.includes(draft.id);
+                return (
+                  <>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
                   {draft.priority} priority
                 </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-300">
-                  Draft Only
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${isCreated ? "border-app-success/30 bg-app-success/12 text-green-100" : "border-white/10 bg-white/[0.04] text-slate-300"}`}>
+                  {isCreated ? "Created" : "Draft Only"}
                 </span>
               </div>
               <dl className="mt-4 space-y-3">
@@ -928,6 +1114,9 @@ function ExecutionPreview({ drafts }: { drafts: AITaskDraft[] }) {
                   <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceProposal}</dd>
                 </div>
               </dl>
+                  </>
+                );
+              })()}
             </article>
           ))}
         </div>
@@ -1050,6 +1239,7 @@ function buildExecutionTaskDrafts(proposals: AIActionProposal[]): AITaskDraft[] 
   return proposals.map((proposal) => ({
     description: proposal.reason,
     dueDate: getSuggestedDraftDueDate(proposal.impact),
+    id: proposal.id,
     priority: proposal.impact,
     sourceProposal: proposal.title,
     title: proposal.title,
@@ -1416,6 +1606,63 @@ function ConfirmCreateModal({
           >
             <FilePlus2 size={17} />
             {isCreating ? "Creating..." : "Confirm & Create"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmCreateTasksModal({
+  draftCount,
+  eventName,
+  isCreating,
+  onCancel,
+  onConfirm,
+}: {
+  draftCount: number;
+  eventName: string;
+  isCreating: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-xl border border-white/10 bg-slate-900 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Confirm task creation</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">You are about to create {formatNumber(draftCount)} tasks.</h2>
+            <p className="mt-2 text-sm leading-6 text-app-muted">
+              These tasks will be added to {eventName}. No sponsors, vendors, artists, finance records, or event fields will be changed.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/[0.08]"
+            disabled={isCreating}
+            onClick={onCancel}
+            type="button"
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex h-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-100 transition hover:border-white/20 hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isCreating}
+            onClick={onCancel}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isCreating}
+            onClick={onConfirm}
+            type="button"
+          >
+            <CalendarCheck2 size={17} />
+            {isCreating ? "Creating..." : "Create Tasks"}
           </button>
         </div>
       </div>
