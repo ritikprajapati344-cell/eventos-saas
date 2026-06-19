@@ -1,4 +1,4 @@
-import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 import { BrainCircuit, BriefcaseBusiness, CalendarCheck2, Copy, Download, FilePlus2, MapPin, Plus, RefreshCw, ShieldAlert, Sparkles, Ticket, Trash2, TrendingUp, X } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
@@ -105,6 +105,8 @@ export default function AICenter({
   const [createdDraftSignature, setCreatedDraftSignature] = useState("");
   const [selectedAnalysisEventId, setSelectedAnalysisEventId] = useState("");
   const [analyzedEventId, setAnalyzedEventId] = useState("");
+  const [selectedProposalIds, setSelectedProposalIds] = useState<string[]>([]);
+  const [approvedProposalIds, setApprovedProposalIds] = useState<string[]>([]);
   const workspaceInsights = useMemo(
     () => buildExecutiveInsights(data, financeTransactions, "the workspace"),
     [data, financeTransactions],
@@ -126,6 +128,12 @@ export default function AICenter({
     () => buildAIActionProposals(workspaceInsights, eventAnalysis, analyzedEvent),
     [workspaceInsights, eventAnalysis, analyzedEvent],
   );
+
+  useEffect(() => {
+    const activeProposalIds = new Set(actionProposals.map((proposal) => proposal.id));
+    setSelectedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
+    setApprovedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
+  }, [actionProposals]);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -320,7 +328,21 @@ export default function AICenter({
         onChangeEvent={setSelectedAnalysisEventId}
       />
 
-      <AIActionProposals proposals={actionProposals} />
+      <AIActionProposals
+        approvedProposalIds={approvedProposalIds}
+        onApproveSelected={() => {
+          setApprovedProposalIds((current) => Array.from(new Set([...current, ...selectedProposalIds])));
+        }}
+        onToggleProposal={(proposalId) => {
+          setSelectedProposalIds((current) => (
+            current.includes(proposalId)
+              ? current.filter((selectedId) => selectedId !== proposalId)
+              : [...current, proposalId]
+          ));
+        }}
+        proposals={actionProposals}
+        selectedProposalIds={selectedProposalIds}
+      />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -727,7 +749,25 @@ function WorkspaceIntelligence({ insights }: { insights: ReturnType<typeof build
   );
 }
 
-function AIActionProposals({ proposals }: { proposals: AIActionProposal[] }) {
+function AIActionProposals({
+  approvedProposalIds,
+  onApproveSelected,
+  onToggleProposal,
+  proposals,
+  selectedProposalIds,
+}: {
+  approvedProposalIds: string[];
+  onApproveSelected: () => void;
+  onToggleProposal: (proposalId: string) => void;
+  proposals: AIActionProposal[];
+  selectedProposalIds: string[];
+}) {
+  const selectedCount = selectedProposalIds.length;
+  const approvedSelectedCount = selectedProposalIds.filter((proposalId) => approvedProposalIds.includes(proposalId)).length;
+  const approvalStatus = approvedSelectedCount > 0
+    ? "Approved — Execution coming in Sprint 18E"
+    : "Ready for Sprint 18E execution";
+
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -740,14 +780,28 @@ function AIActionProposals({ proposals }: { proposals: AIActionProposal[] }) {
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
           <button
-            className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-400 opacity-70"
-            disabled
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-app-primary px-3 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={selectedCount === 0}
+            onClick={onApproveSelected}
             type="button"
           >
             <ShieldAlert size={16} />
-            Approve Actions
+            Approve Selected Actions
           </button>
           <p className="text-xs text-app-muted">Approval workflow coming in Sprint 18D.</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
+        <div className="rounded-lg border border-app-primary/20 bg-app-primary/10 p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-blue-100">Selected Actions</p>
+          <p className="mt-2 text-2xl font-semibold text-white">{formatNumber(selectedCount)}</p>
+          <p className="mt-1 text-sm text-app-muted">Total selected actions: {formatNumber(selectedCount)}</p>
+        </div>
+        <div className="rounded-lg border border-app-warning/25 bg-app-warning/10 p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-amber-100">Approval status</p>
+          <p className="mt-2 break-words text-base font-semibold text-white">{approvalStatus}</p>
+          <p className="mt-1 text-sm text-app-muted">Approved actions are not executed yet. Execution starts in Sprint 18E.</p>
         </div>
       </div>
 
@@ -758,7 +812,19 @@ function AIActionProposals({ proposals }: { proposals: AIActionProposal[] }) {
       ) : (
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {proposals.map((proposal) => (
-            <article key={proposal.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+            <article
+              key={proposal.id}
+              className={`rounded-lg border p-4 transition ${selectedProposalIds.includes(proposal.id) ? "border-app-primary/45 bg-app-primary/10" : "border-white/10 bg-white/[0.035]"}`}
+            >
+              <label className="mb-4 flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2">
+                <input
+                  checked={selectedProposalIds.includes(proposal.id)}
+                  className="h-4 w-4 rounded border-app-primary/45 bg-slate-950 text-app-primary focus:ring-app-primary/35"
+                  onChange={() => onToggleProposal(proposal.id)}
+                  type="checkbox"
+                />
+                <span className="text-sm font-medium text-slate-100">Select action</span>
+              </label>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(proposal.impact)}`}>
                   {proposal.impact} impact
@@ -766,8 +832,8 @@ function AIActionProposals({ proposals }: { proposals: AIActionProposal[] }) {
                 <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
                   {proposal.source}
                 </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-300">
-                  Proposal only
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${approvedProposalIds.includes(proposal.id) ? "border-app-success/30 bg-app-success/12 text-green-100" : "border-white/10 bg-white/[0.04] text-slate-300"}`}>
+                  {approvedProposalIds.includes(proposal.id) ? "Approved — Execution coming in Sprint 18E" : "Proposal only"}
                 </span>
               </div>
               <h3 className="mt-4 break-words text-base font-semibold text-white">{proposal.title}</h3>
