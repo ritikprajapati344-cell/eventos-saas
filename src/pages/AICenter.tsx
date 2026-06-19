@@ -100,6 +100,17 @@ interface AIExecutionHistoryEntry {
   undoneAt?: string;
 }
 
+type AIApprovalQueueStatus = "Proposed" | "Approved" | "Executed" | "Undone" | "Failed";
+
+interface AIApprovalQueueItem {
+  id: string;
+  impact: "High" | "Medium" | "Low";
+  source: "AI Center" | "Event" | "Workspace";
+  status: AIApprovalQueueStatus;
+  targetEvent: string;
+  title: string;
+}
+
 export default function AICenter({
   activitiesData,
   data,
@@ -173,6 +184,25 @@ export default function AICenter({
   const creatableExecutionDrafts = useMemo(
     () => executionDrafts.filter((draft) => !createdExecutionDraftIds.includes(draft.id)),
     [createdExecutionDraftIds, executionDrafts],
+  );
+  const executionTargetEventName = data.events.find((event) => event.id === executionEventId)?.name ?? "";
+  const approvalQueueItems = useMemo(
+    () => buildAIApprovalQueueItems({
+      actionProposals,
+      analyzedEventName: analyzedEvent?.name,
+      approvedProposalIds,
+      createdExecutionDraftIds,
+      executionHistory,
+      executionTargetEventName,
+    }),
+    [
+      actionProposals,
+      analyzedEvent?.name,
+      approvedProposalIds,
+      createdExecutionDraftIds,
+      executionHistory,
+      executionTargetEventName,
+    ],
   );
 
   useEffect(() => {
@@ -596,6 +626,8 @@ export default function AICenter({
         proposals={actionProposals}
         selectedProposalIds={selectedProposalIds}
       />
+
+      <AIApprovalQueue items={approvalQueueItems} />
 
       <ExecutionPreview
         createdDraftIds={createdExecutionDraftIds}
@@ -1138,6 +1170,85 @@ function AIActionProposals({
   );
 }
 
+function AIApprovalQueue({ items }: { items: AIApprovalQueueItem[] }) {
+  const queueStatuses: AIApprovalQueueStatus[] = ["Proposed", "Approved", "Executed", "Undone", "Failed"];
+  const counts = getApprovalQueueCounts(items);
+
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI Approval Queue</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Action status board</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Read-only queue assembled from proposals, approvals, execution drafts, and execution history.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+          UI aggregation only
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <ApprovalQueueCount label="Proposed" value={counts.Proposed} />
+        <ApprovalQueueCount label="Approved" value={counts.Approved} />
+        <ApprovalQueueCount label="Executed" value={counts.Executed} />
+        <ApprovalQueueCount label="Undone" value={counts.Undone} />
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-5">
+        {queueStatuses.map((status) => {
+          const statusItems = items.filter((item) => item.status === status);
+
+          return (
+            <article key={status} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-medium uppercase tracking-[0.12em] text-app-muted">{status}</p>
+                <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${getApprovalQueueStatusClass(status)}`}>
+                  {formatNumber(statusItems.length)}
+                </span>
+              </div>
+
+              {statusItems.length === 0 ? (
+                <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/25 px-3 py-3 text-sm text-app-muted">
+                  No {status.toLowerCase()} items.
+                </div>
+              ) : (
+                <ul className="mt-3 space-y-3">
+                  {statusItems.map((item) => (
+                    <li key={item.id} className="rounded-lg border border-white/10 bg-slate-950/30 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${getProposalImpactClass(item.impact)}`}>
+                          {item.impact}
+                        </span>
+                        <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2 py-1 text-xs font-medium text-blue-100">
+                          Source: {item.source}
+                        </span>
+                      </div>
+                      <p className="mt-3 break-words text-sm font-semibold text-white">{item.title}</p>
+                      <p className="mt-2 break-words text-xs leading-5 text-app-muted">Target Event: {item.targetEvent}</p>
+                      <p className="mt-1 text-xs text-app-muted">Status: {item.status}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ApprovalQueueCount({ label, value }: { label: AIApprovalQueueStatus; value: number }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{label} count</p>
+      <p className="mt-2 text-2xl font-semibold text-white">{formatNumber(value)}</p>
+    </div>
+  );
+}
+
 function ExecutionPreview({
   createdDraftIds,
   drafts,
@@ -1469,6 +1580,71 @@ function getProposalImpactClass(impact: AIActionProposal["impact"]) {
   if (impact === "High") return "border-app-danger/30 bg-app-danger/12 text-red-100";
   if (impact === "Medium") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
   return "border-app-success/30 bg-app-success/12 text-green-100";
+}
+
+function buildAIApprovalQueueItems({
+  actionProposals,
+  analyzedEventName,
+  approvedProposalIds,
+  createdExecutionDraftIds,
+  executionHistory,
+  executionTargetEventName,
+}: {
+  actionProposals: AIActionProposal[];
+  analyzedEventName?: string;
+  approvedProposalIds: string[];
+  createdExecutionDraftIds: string[];
+  executionHistory: AIExecutionHistoryEntry[];
+  executionTargetEventName: string;
+}): AIApprovalQueueItem[] {
+  const proposalItems = actionProposals.map((proposal) => {
+    const isExecuted = createdExecutionDraftIds.includes(proposal.id);
+    const isApproved = approvedProposalIds.includes(proposal.id);
+    const targetEvent = proposal.source === "Event"
+      ? analyzedEventName || executionTargetEventName || "Selected event"
+      : executionTargetEventName || "Workspace-wide";
+
+    return {
+      id: `proposal-${proposal.id}`,
+      impact: proposal.impact,
+      source: proposal.source,
+      status: isExecuted ? "Executed" : isApproved ? "Approved" : "Proposed",
+      targetEvent,
+      title: proposal.title,
+    } satisfies AIApprovalQueueItem;
+  });
+
+  const historyItems = executionHistory.map((entry) => ({
+    id: `history-${entry.id}`,
+    impact: entry.status === "Undone" ? "Low" : "Medium",
+    source: entry.source,
+    status: entry.status === "Undone" ? "Undone" : "Executed",
+    targetEvent: entry.targetEvent,
+    title: `${formatNumber(entry.taskCount)} AI-created tasks`,
+  }) satisfies AIApprovalQueueItem);
+
+  return [...proposalItems, ...historyItems];
+}
+
+function getApprovalQueueCounts(items: AIApprovalQueueItem[]) {
+  return items.reduce<Record<AIApprovalQueueStatus, number>>((counts, item) => ({
+    ...counts,
+    [item.status]: counts[item.status] + 1,
+  }), {
+    Approved: 0,
+    Executed: 0,
+    Failed: 0,
+    Proposed: 0,
+    Undone: 0,
+  });
+}
+
+function getApprovalQueueStatusClass(status: AIApprovalQueueStatus) {
+  if (status === "Executed") return "border-app-success/30 bg-app-success/12 text-green-100";
+  if (status === "Undone") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
+  if (status === "Failed") return "border-app-danger/30 bg-app-danger/12 text-red-100";
+  if (status === "Approved") return "border-app-primary/30 bg-app-primary/12 text-blue-100";
+  return "border-white/10 bg-white/[0.04] text-slate-300";
 }
 
 function buildExecutionTaskDrafts(proposals: AIActionProposal[]): AITaskDraft[] {
