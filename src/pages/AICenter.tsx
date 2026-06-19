@@ -36,6 +36,8 @@ const mockPlan = {
   risks: ["Venue hold may expire before confirmation", "Sponsor decisions can take longer than ticket launch timelines", "Premium ticket demand needs strong artist positioning"],
 } satisfies AIEventPlan;
 
+const AI_EXECUTION_HISTORY_STORAGE_KEY = "eventos-ai-execution-history-v1";
+
 interface AICenterProps {
   activitiesData: ActivitiesDataSource;
   data: EventOSData;
@@ -132,7 +134,7 @@ export default function AICenter({
   const [isCreatingTasks, setIsCreatingTasks] = useState(false);
   const [taskCreateError, setTaskCreateError] = useState("");
   const [taskCreateMessage, setTaskCreateMessage] = useState("");
-  const [executionHistory, setExecutionHistory] = useState<AIExecutionHistoryEntry[]>([]);
+  const [executionHistory, setExecutionHistory] = useState<AIExecutionHistoryEntry[]>(loadExecutionHistory);
   const workspaceInsights = useMemo(
     () => buildExecutiveInsights(data, financeTransactions, "the workspace"),
     [data, financeTransactions],
@@ -185,6 +187,10 @@ export default function AICenter({
       current && data.events.some((event) => event.id === current) ? current : preferredEventId
     ));
   }, [analyzedEventId, data.events]);
+
+  useEffect(() => {
+    saveExecutionHistory(executionHistory);
+  }, [executionHistory]);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -1342,6 +1348,48 @@ function formatExecutionHistoryTime(createdAt: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(createdAt));
+}
+
+function loadExecutionHistory(): AIExecutionHistoryEntry[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const storedHistory = window.localStorage.getItem(AI_EXECUTION_HISTORY_STORAGE_KEY);
+    if (!storedHistory) return [];
+
+    const parsedHistory = JSON.parse(storedHistory);
+    if (!Array.isArray(parsedHistory)) return [];
+
+    return parsedHistory.filter(isExecutionHistoryEntry);
+  } catch {
+    return [];
+  }
+}
+
+function saveExecutionHistory(history: AIExecutionHistoryEntry[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(AI_EXECUTION_HISTORY_STORAGE_KEY, JSON.stringify(history));
+  } catch {
+    // Keep AI Center usable even if browser storage is unavailable.
+  }
+}
+
+function isExecutionHistoryEntry(value: unknown): value is AIExecutionHistoryEntry {
+  if (!value || typeof value !== "object") return false;
+
+  const entry = value as Partial<AIExecutionHistoryEntry>;
+  return (
+    typeof entry.createdAt === "string"
+    && typeof entry.id === "string"
+    && entry.source === "AI Center"
+    && entry.status === "Success"
+    && typeof entry.targetEvent === "string"
+    && typeof entry.taskCount === "number"
+    && Array.isArray(entry.taskTitles)
+    && entry.taskTitles.every((title) => typeof title === "string")
+  );
 }
 
 function WorkspaceList({ children, count, title }: { children: ReactNode; count: number; title: string }) {
