@@ -69,6 +69,14 @@ interface EditableDraft {
   venue: string;
 }
 
+interface AIActionProposal {
+  id: string;
+  impact: "High" | "Medium" | "Low";
+  reason: string;
+  source: "Event" | "Workspace";
+  title: string;
+}
+
 export default function AICenter({
   activitiesData,
   data,
@@ -113,6 +121,10 @@ export default function AICenter({
   const eventAnalysis = useMemo(
     () => (analyzedEvent && analyzedWorkspace ? getCopilotInsights(analyzedEvent, analyzedWorkspace) : null),
     [analyzedEvent, analyzedWorkspace],
+  );
+  const actionProposals = useMemo(
+    () => buildAIActionProposals(workspaceInsights, eventAnalysis, analyzedEvent),
+    [workspaceInsights, eventAnalysis, analyzedEvent],
   );
 
   const showToast = (message: string) => {
@@ -307,6 +319,8 @@ export default function AICenter({
         onAnalyze={() => setAnalyzedEventId(analysisEventId)}
         onChangeEvent={setSelectedAnalysisEventId}
       />
+
+      <AIActionProposals proposals={actionProposals} />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -713,6 +727,59 @@ function WorkspaceIntelligence({ insights }: { insights: ReturnType<typeof build
   );
 }
 
+function AIActionProposals({ proposals }: { proposals: AIActionProposal[] }) {
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">AI Action Proposals</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Suggested next moves</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Read-only proposals assembled from Workspace Intelligence and Event Analyzer outputs.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+          <button
+            className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-slate-400 opacity-70"
+            disabled
+            type="button"
+          >
+            <ShieldAlert size={16} />
+            Approve Actions
+          </button>
+          <p className="text-xs text-app-muted">Approval workflow coming in Sprint 18D.</p>
+        </div>
+      </div>
+
+      {proposals.length === 0 ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          No action proposals yet. Add workspace data or run event analysis to surface proposal-ready actions.
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {proposals.map((proposal) => (
+            <article key={proposal.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(proposal.impact)}`}>
+                  {proposal.impact} impact
+                </span>
+                <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                  {proposal.source}
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-300">
+                  Proposal only
+                </span>
+              </div>
+              <h3 className="mt-4 break-words text-base font-semibold text-white">{proposal.title}</h3>
+              <p className="mt-2 break-words text-sm leading-6 text-app-muted">{proposal.reason}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WorkspaceMetric({
   helper,
   icon: Icon,
@@ -748,6 +815,79 @@ function WorkspaceMetric({
       </div>
     </article>
   );
+}
+
+function buildAIActionProposals(
+  workspaceInsights: ReturnType<typeof buildExecutiveInsights>,
+  eventAnalysis: ReturnType<typeof getCopilotInsights> | null,
+  analyzedEvent?: EventItem,
+): AIActionProposal[] {
+  const proposals: AIActionProposal[] = [];
+  const addProposal = (proposal: AIActionProposal) => {
+    const key = `${proposal.title.toLowerCase()}|${proposal.reason.toLowerCase()}`;
+    const exists = proposals.some((item) => `${item.title.toLowerCase()}|${item.reason.toLowerCase()}` === key);
+    if (!exists) proposals.push(proposal);
+  };
+
+  workspaceInsights.topRiskEvents.slice(0, 2).forEach((event) => {
+    addProposal({
+      id: `workspace-risk-${event.id}`,
+      impact: event.riskScore >= 70 ? "High" : "Medium",
+      reason: event.reason,
+      source: "Workspace",
+      title: `Review risk for ${event.name}`,
+    });
+  });
+
+  workspaceInsights.criticalTasks.slice(0, 2).forEach((task) => {
+    addProposal({
+      id: `workspace-task-${task.id}`,
+      impact: task.priority === "High" ? "High" : task.priority === "Medium" ? "Medium" : "Low",
+      reason: `Priority ${task.priority} task is ${task.status} and due ${task.dueDate}.`,
+      source: "Workspace",
+      title: `Clear critical task: ${task.title}`,
+    });
+  });
+
+  if (eventAnalysis) {
+    eventAnalysis.priorityActions.slice(0, 2).forEach((action, index) => {
+      addProposal({
+        id: `event-priority-${index}-${action}`,
+        impact: "High",
+        reason: action,
+        source: "Event",
+        title: analyzedEvent ? `Act on ${analyzedEvent.name}` : "Act on selected event",
+      });
+    });
+
+    eventAnalysis.recommendations.slice(0, 2).forEach((recommendation, index) => {
+      addProposal({
+        id: `event-recommendation-${index}-${recommendation}`,
+        impact: "Medium",
+        reason: recommendation,
+        source: "Event",
+        title: analyzedEvent ? `Review recommendation for ${analyzedEvent.name}` : "Review event recommendation",
+      });
+    });
+  }
+
+  workspaceInsights.summary.slice(0, 3).forEach((summary, index) => {
+    addProposal({
+      id: `workspace-summary-${index}`,
+      impact: index === 0 && workspaceInsights.healthScore < 50 ? "High" : workspaceInsights.healthScore < 75 ? "Medium" : "Low",
+      reason: summary,
+      source: "Workspace",
+      title: index === 0 ? "Review workspace health" : "Review workspace signal",
+    });
+  });
+
+  return proposals.slice(0, 7);
+}
+
+function getProposalImpactClass(impact: AIActionProposal["impact"]) {
+  if (impact === "High") return "border-app-danger/30 bg-app-danger/12 text-red-100";
+  if (impact === "Medium") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
+  return "border-app-success/30 bg-app-success/12 text-green-100";
 }
 
 function WorkspaceList({ children, count, title }: { children: ReactNode; count: number; title: string }) {
