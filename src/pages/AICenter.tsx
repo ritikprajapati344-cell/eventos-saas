@@ -6,6 +6,8 @@ import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
+import { getCopilotInsights } from "../intelligence/eventCopilot";
+import { calculateEventWorkspace } from "../intelligence/eventWorkspace";
 import { buildExecutiveInsights } from "../intelligence/executiveSummary";
 import { generateAIEventPlan, type AICenterBackendMode, type AIEventPlan } from "../lib/aiCenterClient";
 import type { FinanceTransactionRecord } from "../lib/financeTransactionsRepository";
@@ -93,9 +95,24 @@ export default function AICenter({
   const [draft, setDraft] = useState<EditableDraft | null>(null);
   const [toast, setToast] = useState("");
   const [createdDraftSignature, setCreatedDraftSignature] = useState("");
+  const [selectedAnalysisEventId, setSelectedAnalysisEventId] = useState("");
+  const [analyzedEventId, setAnalyzedEventId] = useState("");
   const workspaceInsights = useMemo(
     () => buildExecutiveInsights(data, financeTransactions, "the workspace"),
     [data, financeTransactions],
+  );
+  const analysisEventId = selectedAnalysisEventId || data.events[0]?.id || "";
+  const analyzedEvent = useMemo(
+    () => data.events.find((event) => event.id === analyzedEventId),
+    [analyzedEventId, data.events],
+  );
+  const analyzedWorkspace = useMemo(
+    () => (analyzedEventId ? calculateEventWorkspace(data, analyzedEventId) : null),
+    [analyzedEventId, data],
+  );
+  const eventAnalysis = useMemo(
+    () => (analyzedEvent && analyzedWorkspace ? getCopilotInsights(analyzedEvent, analyzedWorkspace) : null),
+    [analyzedEvent, analyzedWorkspace],
   );
 
   const showToast = (message: string) => {
@@ -281,6 +298,15 @@ export default function AICenter({
       />
 
       <WorkspaceIntelligence insights={workspaceInsights} />
+
+      <ExistingEventAnalyzer
+        analysis={eventAnalysis}
+        analyzedEvent={analyzedEvent}
+        eventId={analysisEventId}
+        events={data.events}
+        onAnalyze={() => setAnalyzedEventId(analysisEventId)}
+        onChangeEvent={setSelectedAnalysisEventId}
+      />
 
       <section className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="glass-panel rounded-lg p-4 sm:p-5">
@@ -469,6 +495,136 @@ function Capability({
   );
 }
 
+function ExistingEventAnalyzer({
+  analysis,
+  analyzedEvent,
+  eventId,
+  events,
+  onAnalyze,
+  onChangeEvent,
+}: {
+  analysis: ReturnType<typeof getCopilotInsights> | null;
+  analyzedEvent?: EventItem;
+  eventId: string;
+  events: EventItem[];
+  onAnalyze: () => void;
+  onChangeEvent: (eventId: string) => void;
+}) {
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Analyze Existing Event</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Event Copilot analysis</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Select an event and run the centralized Copilot intelligence layer. This is read-only and creates no records.
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+          <select
+            className="dashboard-input h-11 min-w-0 flex-1 lg:w-72"
+            disabled={events.length === 0}
+            onChange={(event) => onChangeEvent(event.target.value)}
+            value={eventId}
+          >
+            {events.length === 0 ? (
+              <option value="">No events available</option>
+            ) : events.map((event) => (
+              <option key={event.id} value={event.id}>{event.name}</option>
+            ))}
+          </select>
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!eventId}
+            onClick={onAnalyze}
+            type="button"
+          >
+            <Sparkles size={17} />
+            Run Analysis
+          </button>
+        </div>
+      </div>
+
+      {!analysis || !analyzedEvent ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          {events.length === 0 ? "Create an event first, then return here to analyze it with AI Center." : "Choose an event and run analysis to see Event Copilot insights."}
+        </div>
+      ) : (
+        <div className="mt-5 space-y-5">
+          <div className="rounded-lg border border-white/10 bg-slate-950/30 p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Analyzing</p>
+            <p className="mt-1 break-words text-lg font-semibold text-white">{analyzedEvent.name}</p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <WorkspaceMetric
+              helper="Overall event health from current EventOS signals"
+              icon={Sparkles}
+              title="Event Health Score"
+              tone={analysis.readiness.tone}
+              value={`${analysis.healthScore}/100`}
+            />
+            <WorkspaceMetric
+              helper={analysis.readiness.summary}
+              icon={CalendarCheck2}
+              title="Event Readiness Score"
+              tone={analysis.readiness.tone}
+              value={`${analysis.readiness.score}/100`}
+            />
+            <WorkspaceMetric
+              helper={analysis.revenueAdvisor.suggestedAction}
+              icon={TrendingUp}
+              title="Revenue Advisor"
+              tone={analysis.revenueAdvisor.tone}
+              value={formatCurrency(analysis.revenueAdvisor.revenueGap)}
+            />
+            <WorkspaceMetric
+              helper={analysis.ticket.helper}
+              icon={Ticket}
+              title="Ticket Health"
+              tone={analysis.ticket.tone}
+              value={analysis.ticket.value}
+            />
+            <WorkspaceMetric
+              helper={`${formatNumber(analysis.taskRiskAdvisor.overdueTasks)} overdue, ${formatNumber(analysis.taskRiskAdvisor.highPriorityPending)} high-priority pending`}
+              icon={CalendarCheck2}
+              title="Task Risk"
+              tone={analysis.taskRiskAdvisor.tone}
+              value={analysis.taskRiskAdvisor.riskLevel}
+            />
+            <WorkspaceMetric
+              helper={`Sponsor gap: ${formatCurrency(analysis.sponsorAdvisor.sponsorGap)}`}
+              icon={BriefcaseBusiness}
+              title="Sponsor Opportunity"
+              tone={analysis.sponsorAdvisor.tone}
+              value={formatCurrency(analysis.sponsorAdvisor.opportunityValue)}
+            />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <WorkspaceList title="AI Recommendations" count={analysis.recommendations.length}>
+              {analysis.recommendations.map((recommendation) => (
+                <li key={recommendation} className="flex gap-2 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-primary" />
+                  <span className="min-w-0 break-words">{recommendation}</span>
+                </li>
+              ))}
+            </WorkspaceList>
+            <WorkspaceList title="Priority Actions" count={analysis.priorityActions.length}>
+              {analysis.priorityActions.map((action) => (
+                <li key={action} className="flex gap-2 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2 text-sm leading-6 text-slate-200">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-warning" />
+                  <span className="min-w-0 break-words">{action}</span>
+                </li>
+              ))}
+            </WorkspaceList>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WorkspaceIntelligence({ insights }: { insights: ReturnType<typeof buildExecutiveInsights> }) {
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
@@ -567,14 +723,16 @@ function WorkspaceMetric({
   helper: string;
   icon: typeof Sparkles;
   title: string;
-  tone: "danger" | "success" | "warning";
+  tone: "danger" | "primary" | "success" | "warning";
   value: string;
 }) {
   const toneClass = tone === "success"
     ? "border-app-success/25 bg-app-success/10 text-green-100"
     : tone === "warning"
       ? "border-app-warning/25 bg-app-warning/10 text-amber-100"
-      : "border-app-danger/25 bg-app-danger/10 text-red-100";
+      : tone === "primary"
+        ? "border-app-primary/25 bg-app-primary/10 text-blue-100"
+        : "border-app-danger/25 bg-app-danger/10 text-red-100";
 
   return (
     <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
