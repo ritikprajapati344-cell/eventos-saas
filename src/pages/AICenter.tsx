@@ -128,6 +128,16 @@ interface EventReadinessAction {
   title: string;
 }
 
+interface TimelineDraft {
+  description: string;
+  id: string;
+  phase: string;
+  priority: "High" | "Medium" | "Low";
+  sourceSignal: string;
+  targetEvent: string;
+  title: string;
+}
+
 type ExecutableProposal = AIActionProposal & {
   targetEvent?: string;
 };
@@ -665,6 +675,11 @@ export default function AICenter({
         analyzedEvent={analyzedEvent}
       />
 
+      <TimelineDraftBuilder
+        analysis={eventAnalysis}
+        analyzedEvent={analyzedEvent}
+      />
+
       <AIActionProposals
         approvedProposalIds={approvedProposalIds}
         onApproveSelected={() => {
@@ -1151,6 +1166,81 @@ function EventReadinessActionPlan({
               ))}
             </div>
           </div>
+        </div>
+      )}
+    </section>
+  );
+}
+function TimelineDraftBuilder({
+  analysis,
+  analyzedEvent,
+}: {
+  analysis: ReturnType<typeof getCopilotInsights> | null;
+  analyzedEvent?: EventItem;
+}) {
+  const targetEvent = analyzedEvent?.name ?? "Selected event";
+  const timelineDrafts = analysis ? buildTimelineDrafts(analysis, targetEvent) : [];
+
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Timeline Draft Builder</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Readiness timeline drafts</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Read-only timeline drafts generated from the selected event's readiness plan, risks, and Copilot signals.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+          Draft Only
+        </span>
+      </div>
+
+      {!analysis || !analyzedEvent ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          Run analysis for an event to generate read-only timeline drafts.
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {timelineDrafts.map((draft) => (
+            <article key={draft.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
+                  {draft.priority} priority
+                </span>
+                <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                  Source: AI Center
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200">
+                  Status: Draft Only
+                </span>
+              </div>
+              <dl className="mt-4 space-y-3">
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Timeline Item Title</dt>
+                  <dd className="mt-1 break-words text-base font-semibold text-white">{draft.title}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Date / Phase</dt>
+                  <dd className="mt-1 break-words text-sm font-medium text-white">{draft.phase}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Description</dt>
+                  <dd className="mt-1 break-words text-sm leading-6 text-slate-200">{draft.description}</dd>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Source Signal</dt>
+                    <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceSignal}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Target Event</dt>
+                    <dd className="mt-1 break-words text-sm font-medium text-white">{draft.targetEvent}</dd>
+                  </div>
+                </div>
+              </dl>
+            </article>
+          ))}
         </div>
       )}
     </section>
@@ -1897,6 +1987,117 @@ function buildEventReadinessActions(
   return actions.slice(0, 6);
 }
 
+function buildTimelineDrafts(
+  analysis: ReturnType<typeof getCopilotInsights>,
+  targetEvent: string,
+): TimelineDraft[] {
+  const drafts: TimelineDraft[] = [];
+  const readinessActions = buildEventReadinessActions(analysis, targetEvent);
+  const riskSignals = buildEventReadinessRisks(analysis);
+  const addDraft = (draft: TimelineDraft) => {
+    if (!drafts.some((item) => item.title === draft.title && item.sourceSignal === draft.sourceSignal)) drafts.push(draft);
+  };
+
+  if (analysis.sponsorAdvisor.sponsorGap > 0 || analysis.sponsorAdvisor.opportunityValue > 0) {
+    addDraft({
+      description: `${formatCurrency(analysis.sponsorAdvisor.sponsorGap)} sponsor gap and ${formatCurrency(analysis.sponsorAdvisor.opportunityValue)} sponsor opportunity need a focused outreach checkpoint.`,
+      id: "timeline-sponsor-outreach-push",
+      phase: "Sponsor pipeline phase",
+      priority: analysis.sponsorAdvisor.sponsorGap > 0 ? "High" : "Medium",
+      sourceSignal: "Sponsor Opportunity",
+      targetEvent,
+      title: "Sponsor outreach push",
+    });
+  }
+
+  if (analysis.ticket.tone !== "success") {
+    addDraft({
+      description: analysis.ticket.helper,
+      id: "timeline-ticket-promotion-checkpoint",
+      phase: "Ticket sales checkpoint",
+      priority: analysis.ticket.tone === "danger" ? "High" : "Medium",
+      sourceSignal: "Ticket Health",
+      targetEvent,
+      title: "Ticket promotion checkpoint",
+    });
+  }
+
+  if (analysis.taskRiskAdvisor.overdueTasks > 0 || analysis.taskRiskAdvisor.highPriorityPending > 0) {
+    addDraft({
+      description: `${formatNumber(analysis.taskRiskAdvisor.overdueTasks)} overdue tasks and ${formatNumber(analysis.taskRiskAdvisor.highPriorityPending)} high-priority pending tasks should be cleared before the next readiness review.`,
+      id: "timeline-critical-task-clearance-window",
+      phase: "Immediate operations window",
+      priority: analysis.taskRiskAdvisor.riskLevel === "High" ? "High" : "Medium",
+      sourceSignal: "Task Risk",
+      targetEvent,
+      title: "Critical task clearance window",
+    });
+  }
+
+  if (analysis.revenueAdvisor.revenueGap > 0) {
+    addDraft({
+      description: analysis.revenueAdvisor.suggestedAction,
+      id: "timeline-revenue-recovery-review",
+      phase: "Revenue recovery review",
+      priority: analysis.revenueAdvisor.tone === "danger" ? "High" : "Medium",
+      sourceSignal: "Revenue Advisor",
+      targetEvent,
+      title: "Revenue recovery review",
+    });
+  }
+
+  const vendorSignal = [...analysis.missingChecklist, ...analysis.priorityActions, ...analysis.recommendations]
+    .find((item) => item.toLowerCase().includes("vendor"));
+  if (vendorSignal) {
+    addDraft({
+      description: vendorSignal,
+      id: "timeline-vendor-confirmation-checkpoint",
+      phase: "Production confirmation phase",
+      priority: "Medium",
+      sourceSignal: "Event Readiness Action Plan",
+      targetEvent,
+      title: "Vendor confirmation checkpoint",
+    });
+  }
+
+  readinessActions.slice(0, 2).forEach((action, index) => {
+    addDraft({
+      description: action.reason,
+      id: `timeline-readiness-action-${index}`,
+      phase: index === 0 ? "Next readiness review" : "Follow-up readiness review",
+      priority: action.priority,
+      sourceSignal: "Event Readiness Action Plan",
+      targetEvent: action.targetEvent,
+      title: action.title,
+    });
+  });
+
+  riskSignals.slice(0, 1).forEach((risk) => {
+    addDraft({
+      description: risk.reason,
+      id: "timeline-top-risk-review",
+      phase: "Final readiness review",
+      priority: risk.tone === "danger" ? "High" : risk.tone === "warning" ? "Medium" : "Low",
+      sourceSignal: risk.title,
+      targetEvent,
+      title: "Final readiness review",
+    });
+  });
+
+  if (drafts.length === 0) {
+    addDraft({
+      description: analysis.readiness.summary,
+      id: "timeline-maintain-readiness-review",
+      phase: "Weekly readiness review",
+      priority: "Low",
+      sourceSignal: "Event Readiness Action Plan",
+      targetEvent,
+      title: "Final readiness review",
+    });
+  }
+
+  return drafts.slice(0, 6);
+}
 function getReadinessToneClass(tone: "danger" | "primary" | "success" | "warning") {
   if (tone === "success") return "border-app-success/30 bg-app-success/12 text-green-100";
   if (tone === "warning") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
