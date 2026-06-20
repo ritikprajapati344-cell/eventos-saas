@@ -111,6 +111,14 @@ interface AIApprovalQueueItem {
   title: string;
 }
 
+interface SponsorActionDraft {
+  expectedImpact: "High" | "Medium" | "Low";
+  id: string;
+  reason: string;
+  targetEvent: string;
+  title: string;
+}
+
 export default function AICenter({
   activitiesData,
   data,
@@ -171,6 +179,10 @@ export default function AICenter({
   );
   const actionProposals = useMemo(
     () => buildAIActionProposals(workspaceInsights, eventAnalysis, analyzedEvent),
+    [workspaceInsights, eventAnalysis, analyzedEvent],
+  );
+  const sponsorActionDrafts = useMemo(
+    () => buildSponsorActionDrafts(workspaceInsights, eventAnalysis, analyzedEvent),
     [workspaceInsights, eventAnalysis, analyzedEvent],
   );
   const approvedActionProposals = useMemo(
@@ -626,6 +638,8 @@ export default function AICenter({
         proposals={actionProposals}
         selectedProposalIds={selectedProposalIds}
       />
+
+      <SponsorActionDrafts drafts={sponsorActionDrafts} />
 
       <AIApprovalQueue items={approvalQueueItems} />
 
@@ -1170,6 +1184,54 @@ function AIActionProposals({
   );
 }
 
+function SponsorActionDrafts({ drafts }: { drafts: SponsorActionDraft[] }) {
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Sponsor Action Drafts</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Read-only sponsor next steps</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Informational sponsor actions assembled from existing workspace and event sponsor intelligence.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+          Draft Only
+        </span>
+      </div>
+
+      {drafts.length === 0 ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 p-4 text-sm leading-6 text-app-muted">
+          No sponsor action drafts yet. Analyze an event or add sponsor pipeline data to see AI Center suggestions here.
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          {drafts.map((draft) => (
+            <article key={draft.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.expectedImpact)}`}>
+                  {draft.expectedImpact} impact
+                </span>
+                <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                  Source: AI Center
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200">
+                  Status: Draft Only
+                </span>
+              </div>
+              <h3 className="mt-4 break-words text-base font-semibold text-white">{draft.title}</h3>
+              <p className="mt-2 break-words text-sm leading-6 text-app-muted">{draft.reason}</p>
+              <p className="mt-4 break-words text-xs uppercase tracking-[0.12em] text-slate-400">
+                Target Event: <span className="normal-case tracking-normal text-slate-200">{draft.targetEvent}</span>
+              </p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AIApprovalQueue({ items }: { items: AIApprovalQueueItem[] }) {
   const queueStatuses: AIApprovalQueueStatus[] = ["Proposed", "Approved", "Executed", "Undone", "Failed"];
   const counts = getApprovalQueueCounts(items);
@@ -1580,6 +1642,97 @@ function getProposalImpactClass(impact: AIActionProposal["impact"]) {
   if (impact === "High") return "border-app-danger/30 bg-app-danger/12 text-red-100";
   if (impact === "Medium") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
   return "border-app-success/30 bg-app-success/12 text-green-100";
+}
+
+function buildSponsorActionDrafts(
+  workspaceInsights: ReturnType<typeof buildExecutiveInsights>,
+  eventAnalysis: ReturnType<typeof getCopilotInsights> | null,
+  analyzedEvent?: EventItem,
+): SponsorActionDraft[] {
+  const drafts: SponsorActionDraft[] = [];
+  const addDraft = (draft: SponsorActionDraft) => {
+    const key = `${draft.title.toLowerCase()}|${draft.targetEvent.toLowerCase()}`;
+    const exists = drafts.some((item) => `${item.title.toLowerCase()}|${item.targetEvent.toLowerCase()}` === key);
+    if (!exists) drafts.push(draft);
+  };
+  const workspaceTarget = "Workspace-wide";
+  const eventTarget = analyzedEvent?.name ?? "Selected event";
+  const sponsorPipeline = workspaceInsights.sponsorPipeline;
+
+  if (sponsorPipeline.activeDeals > 0) {
+    addDraft({
+      expectedImpact: sponsorPipeline.healthScore < 45 ? "High" : "Medium",
+      id: "workspace-follow-up-sponsor-leads",
+      reason: `${formatNumber(sponsorPipeline.activeDeals)} active sponsor ${sponsorPipeline.activeDeals === 1 ? "deal needs" : "deals need"} follow-up to improve pipeline movement.`,
+      targetEvent: workspaceTarget,
+      title: "Follow up sponsor leads",
+    });
+  }
+
+  if (sponsorPipeline.pipelineValue > sponsorPipeline.receivedValue) {
+    addDraft({
+      expectedImpact: sponsorPipeline.pipelineValue - sponsorPipeline.receivedValue > 0 ? "High" : "Medium",
+      id: "workspace-review-sponsor-pipeline",
+      reason: `${formatCurrency(Math.max(sponsorPipeline.pipelineValue - sponsorPipeline.receivedValue, 0))} remains between sponsor pipeline value and received sponsor revenue.`,
+      targetEvent: workspaceTarget,
+      title: "Review sponsor pipeline",
+    });
+  }
+
+  if (sponsorPipeline.conversionRate < 50) {
+    addDraft({
+      expectedImpact: sponsorPipeline.activeDeals > 0 ? "High" : "Medium",
+      id: "workspace-schedule-sponsor-meetings",
+      reason: `Sponsor conversion is ${formatNumber(sponsorPipeline.conversionRate)}%, so near-term meetings can move conversations toward proposal and payment decisions.`,
+      targetEvent: workspaceTarget,
+      title: "Schedule sponsor meetings",
+    });
+  }
+
+  if (eventAnalysis) {
+    const advisor = eventAnalysis.sponsorAdvisor;
+    if (advisor.sponsorGap > 0) {
+      addDraft({
+        expectedImpact: advisor.sponsorGap > 0 ? "High" : "Medium",
+        id: "event-increase-sponsor-outreach",
+        reason: `${formatCurrency(advisor.sponsorGap)} sponsor gap remains for ${eventTarget}. Focus outreach on the suggested sponsor categories.`,
+        targetEvent: eventTarget,
+        title: "Increase sponsor outreach",
+      });
+    }
+
+    if (advisor.suggestedCategories.length > 0) {
+      addDraft({
+        expectedImpact: advisor.sponsorGap > 0 ? "High" : "Medium",
+        id: "event-contact-potential-sponsors",
+        reason: `Target ${advisor.suggestedCategories.slice(0, 3).join(", ")} sponsor categories for ${eventTarget}.`,
+        targetEvent: eventTarget,
+        title: `Contact ${formatNumber(Math.min(5, Math.max(3, advisor.suggestedCategories.length)))} potential sponsors`,
+      });
+    }
+
+    if (advisor.opportunityValue > 0) {
+      addDraft({
+        expectedImpact: advisor.opportunityValue >= 100000 ? "High" : "Medium",
+        id: "event-create-sponsorship-package",
+        reason: `${formatCurrency(advisor.opportunityValue)} sponsor opportunity is available based on current event readiness and revenue signals.`,
+        targetEvent: eventTarget,
+        title: "Create sponsorship package",
+      });
+    }
+  }
+
+  if (drafts.length === 0) {
+    addDraft({
+      expectedImpact: "Low",
+      id: "workspace-maintain-sponsor-review",
+      reason: "Sponsor pipeline looks stable from the current intelligence signals. Keep a weekly review cadence before the next event milestone.",
+      targetEvent: workspaceTarget,
+      title: "Review sponsor pipeline",
+    });
+  }
+
+  return drafts.slice(0, 6);
 }
 
 function buildAIApprovalQueueItems({
