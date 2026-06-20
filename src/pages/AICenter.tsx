@@ -120,6 +120,14 @@ interface SponsorActionDraft {
   title: string;
 }
 
+interface EventReadinessAction {
+  id: string;
+  priority: "High" | "Medium" | "Low";
+  reason: string;
+  targetEvent: string;
+  title: string;
+}
+
 type ExecutableProposal = AIActionProposal & {
   targetEvent?: string;
 };
@@ -652,6 +660,11 @@ export default function AICenter({
         onChangeEvent={setSelectedAnalysisEventId}
       />
 
+      <EventReadinessActionPlan
+        analysis={eventAnalysis}
+        analyzedEvent={analyzedEvent}
+      />
+
       <AIActionProposals
         approvedProposalIds={approvedProposalIds}
         onApproveSelected={() => {
@@ -1042,6 +1055,107 @@ function ExistingEventAnalyzer({
   );
 }
 
+function EventReadinessActionPlan({
+  analysis,
+  analyzedEvent,
+}: {
+  analysis: ReturnType<typeof getCopilotInsights> | null;
+  analyzedEvent?: EventItem;
+}) {
+  const targetEvent = analyzedEvent?.name ?? "Selected event";
+  const risks = analysis ? buildEventReadinessRisks(analysis) : [];
+  const actions = analysis ? buildEventReadinessActions(analysis, targetEvent) : [];
+
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Event Readiness Action Plan</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Readiness recommendations</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Read-only event readiness plan assembled from the selected event's existing Copilot intelligence.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+          No execution flow
+        </span>
+      </div>
+
+      {!analysis || !analyzedEvent ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          Run analysis for an event to generate a readiness action plan.
+        </div>
+      ) : (
+        <div className="mt-5 space-y-5">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <WorkspaceMetric
+              helper="Readiness score from current event signals"
+              icon={CalendarCheck2}
+              title="Readiness Score"
+              tone={analysis.readiness.tone}
+              value={`${analysis.readiness.score}/100`}
+            />
+            <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4 md:col-span-1 xl:col-span-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Readiness Summary</p>
+              <p className="mt-3 break-words text-lg font-semibold text-white">{analysis.readiness.summary}</p>
+              <p className="mt-2 text-sm leading-6 text-app-muted">Target Event: {targetEvent}</p>
+            </article>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Top Risks</p>
+            <div className="mt-4 grid gap-4 lg:grid-cols-4">
+            {risks.map((risk) => (
+              <article key={risk.title} className="rounded-lg border border-white/10 bg-slate-950/30 p-4">
+                <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getReadinessToneClass(risk.tone)}`}>
+                  {risk.label}
+                </span>
+                <h3 className="mt-3 text-sm font-semibold text-white">{risk.title}</h3>
+                <p className="mt-2 break-words text-sm leading-6 text-app-muted">{risk.reason}</p>
+              </article>
+            ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Recommended Actions</p>
+                <h3 className="mt-1 text-lg font-semibold text-white">Read-only next steps</h3>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+                Recommendation
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {actions.map((action) => (
+                <article key={action.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(action.priority)}`}>
+                      {action.priority} priority
+                    </span>
+                    <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                      Source: Event Readiness Plan
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200">
+                      Status: Recommendation
+                    </span>
+                  </div>
+                  <h4 className="mt-4 break-words text-base font-semibold text-white">{action.title}</h4>
+                  <p className="mt-2 break-words text-sm leading-6 text-app-muted">{action.reason}</p>
+                  <p className="mt-4 break-words text-xs uppercase tracking-[0.12em] text-slate-400">
+                    Target Event: <span className="normal-case tracking-normal text-slate-200">{action.targetEvent}</span>
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
 function WorkspaceIntelligence({ insights }: { insights: ReturnType<typeof buildExecutiveInsights> }) {
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
@@ -1672,6 +1786,123 @@ function WorkspaceMetric({
   );
 }
 
+function buildEventReadinessRisks(analysis: ReturnType<typeof getCopilotInsights>) {
+  return [
+    {
+      label: analysis.taskRiskAdvisor.riskLevel,
+      reason: `${formatNumber(analysis.taskRiskAdvisor.overdueTasks)} overdue tasks and ${formatNumber(analysis.taskRiskAdvisor.highPriorityPending)} high-priority pending tasks.`,
+      title: "Task Risk",
+      tone: analysis.taskRiskAdvisor.tone,
+    },
+    {
+      label: analysis.revenueAdvisor.revenueGap > 0 ? "At risk" : "On track",
+      reason: analysis.revenueAdvisor.suggestedAction,
+      title: "Revenue Advisor",
+      tone: analysis.revenueAdvisor.tone,
+    },
+    {
+      label: analysis.sponsorAdvisor.sponsorGap > 0 ? "Gap open" : "Stable",
+      reason: `Sponsor gap: ${formatCurrency(analysis.sponsorAdvisor.sponsorGap)}. Opportunity: ${formatCurrency(analysis.sponsorAdvisor.opportunityValue)}.`,
+      title: "Sponsor Opportunity",
+      tone: analysis.sponsorAdvisor.tone,
+    },
+    {
+      label: analysis.ticket.value,
+      reason: analysis.ticket.helper,
+      title: "Ticket Health",
+      tone: analysis.ticket.tone,
+    },
+  ];
+}
+
+function buildEventReadinessActions(
+  analysis: ReturnType<typeof getCopilotInsights>,
+  targetEvent: string,
+): EventReadinessAction[] {
+  const actions: EventReadinessAction[] = [];
+  const addAction = (action: EventReadinessAction) => {
+    if (!actions.some((item) => item.title === action.title && item.reason === action.reason)) actions.push(action);
+  };
+
+  if (analysis.sponsorAdvisor.sponsorGap > 0 || analysis.sponsorAdvisor.opportunityValue > 0) {
+    addAction({
+      id: "readiness-sponsor-follow-up",
+      priority: analysis.sponsorAdvisor.sponsorGap > 0 ? "High" : "Medium",
+      reason: analysis.sponsorAdvisor.suggestedCategories.length > 0 ? `Focus outreach on ${analysis.sponsorAdvisor.suggestedCategories.slice(0, 3).join(", ")} sponsor categories.` : `Sponsor gap remains ${formatCurrency(analysis.sponsorAdvisor.sponsorGap)} for this event.`,
+      targetEvent,
+      title: "Follow up sponsor leads",
+    });
+  }
+
+  if (analysis.taskRiskAdvisor.overdueTasks > 0 || analysis.taskRiskAdvisor.highPriorityPending > 0) {
+    addAction({
+      id: "readiness-resolve-overdue-tasks",
+      priority: analysis.taskRiskAdvisor.riskLevel === "High" ? "High" : "Medium",
+      reason: `${formatNumber(analysis.taskRiskAdvisor.overdueTasks)} overdue tasks and ${formatNumber(analysis.taskRiskAdvisor.highPriorityPending)} high-priority pending tasks need attention.`,
+      targetEvent,
+      title: "Resolve overdue tasks",
+    });
+  }
+
+  if (analysis.ticket.tone !== "success") {
+    addAction({
+      id: "readiness-ticket-promotion",
+      priority: analysis.ticket.tone === "danger" ? "High" : "Medium",
+      reason: analysis.ticket.helper,
+      targetEvent,
+      title: "Increase ticket promotion",
+    });
+  }
+
+  if (analysis.revenueAdvisor.revenueGap > 0) {
+    addAction({
+      id: "readiness-revenue-review",
+      priority: analysis.revenueAdvisor.tone === "danger" ? "High" : "Medium",
+      reason: analysis.revenueAdvisor.suggestedAction,
+      targetEvent,
+      title: "Review revenue recovery plan",
+    });
+  }
+
+  if (analysis.missingChecklist.some((item) => item.toLowerCase().includes("vendor"))) {
+    addAction({
+      id: "readiness-vendor-commitments",
+      priority: "Medium",
+      reason: analysis.missingChecklist.find((item) => item.toLowerCase().includes("vendor")) ?? "Vendor readiness needs review before launch.",
+      targetEvent,
+      title: "Review vendor commitments",
+    });
+  }
+
+  analysis.priorityActions.slice(0, 2).forEach((action, index) => {
+    addAction({
+      id: `readiness-priority-${index}`,
+      priority: index === 0 ? "High" : "Medium",
+      reason: action,
+      targetEvent,
+      title: "Act on readiness priority",
+    });
+  });
+
+  if (actions.length === 0) {
+    addAction({
+      id: "readiness-maintain-plan",
+      priority: "Low",
+      reason: analysis.readiness.summary,
+      targetEvent,
+      title: "Maintain readiness cadence",
+    });
+  }
+
+  return actions.slice(0, 6);
+}
+
+function getReadinessToneClass(tone: "danger" | "primary" | "success" | "warning") {
+  if (tone === "success") return "border-app-success/30 bg-app-success/12 text-green-100";
+  if (tone === "warning") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
+  if (tone === "primary") return "border-app-primary/30 bg-app-primary/12 text-blue-100";
+  return "border-app-danger/30 bg-app-danger/12 text-red-100";
+}
 function buildAIActionProposals(
   workspaceInsights: ReturnType<typeof buildExecutiveInsights>,
   eventAnalysis: ReturnType<typeof getCopilotInsights> | null,
