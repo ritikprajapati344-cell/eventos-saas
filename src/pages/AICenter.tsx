@@ -306,22 +306,46 @@ export default function AICenter({
   useEffect(() => {
     const activeProposalIds = new Set(actionProposals.map((proposal) => proposal.id));
     const activeExecutionDraftIds = new Set(executionDrafts.map((draft) => draft.id));
-    setSelectedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
-    setApprovedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
-    setCreatedExecutionDraftIds((current) => current.filter((proposalId) => activeExecutionDraftIds.has(proposalId)));
+    setSelectedProposalIds((current) => {
+      const next = current.filter((proposalId) => activeProposalIds.has(proposalId));
+      return sameStringArray(current, next) ? current : next;
+    });
+    setApprovedProposalIds((current) => {
+      const next = current.filter((proposalId) => activeProposalIds.has(proposalId));
+      return sameStringArray(current, next) ? current : next;
+    });
+    setCreatedExecutionDraftIds((current) => {
+      const next = current.filter((proposalId) => activeExecutionDraftIds.has(proposalId));
+      return sameStringArray(current, next) ? current : next;
+    });
   }, [actionProposals, executionDrafts]);
 
   useEffect(() => {
     const activeSponsorDraftIds = new Set(sponsorActionDrafts.map((draft) => draft.id));
-    setSelectedSponsorDraftIds((current) => current.filter((draftId) => activeSponsorDraftIds.has(draftId)));
-    setApprovedSponsorDraftIds((current) => current.filter((draftId) => activeSponsorDraftIds.has(draftId)));
+    setSelectedSponsorDraftIds((current) => {
+      const next = current.filter((draftId) => activeSponsorDraftIds.has(draftId));
+      return sameStringArray(current, next) ? current : next;
+    });
+    setApprovedSponsorDraftIds((current) => {
+      const next = current.filter((draftId) => activeSponsorDraftIds.has(draftId));
+      return sameStringArray(current, next) ? current : next;
+    });
   }, [sponsorActionDrafts]);
 
   useEffect(() => {
     const activeTimelineDraftIds = new Set(timelineDrafts.map((draft) => draft.id));
-    setSelectedTimelineDraftIds((current) => current.filter((draftId) => activeTimelineDraftIds.has(draftId)));
-    setApprovedTimelineDraftIds((current) => current.filter((draftId) => activeTimelineDraftIds.has(draftId)));
-    setCreatedTimelineDraftIds((current) => current.filter((draftId) => activeTimelineDraftIds.has(draftId)));
+    setSelectedTimelineDraftIds((current) => {
+      const next = current.filter((draftId) => activeTimelineDraftIds.has(draftId));
+      return sameStringArray(current, next) ? current : next;
+    });
+    setApprovedTimelineDraftIds((current) => {
+      const next = current.filter((draftId) => activeTimelineDraftIds.has(draftId));
+      return sameStringArray(current, next) ? current : next;
+    });
+    setCreatedTimelineDraftIds((current) => {
+      const next = current.filter((draftId) => activeTimelineDraftIds.has(draftId));
+      return sameStringArray(current, next) ? current : next;
+    });
   }, [timelineDrafts]);
 
   useEffect(() => {
@@ -3325,6 +3349,10 @@ function getSuggestedDraftDueDate(impact: AIActionProposal["impact"]) {
   const daysToAdd = impact === "High" ? 3 : impact === "Medium" ? 7 : 14;
   dueDate.setDate(dueDate.getDate() + daysToAdd);
   return dueDate.toISOString().slice(0, 10);
+}
+
+function sameStringArray(first: string[], second: string[]) {
+  return first.length === second.length && first.every((value, index) => value === second[index]);
 }
 
 function toTimelineWriteInput(draft: TimelineExecutionDraft, event: EventItem) {
