@@ -135,6 +135,16 @@ interface EventReadinessAction {
   title: string;
 }
 
+type IntelligenceTestStatus = "Pass" | "Warning" | "Needs Data";
+
+interface IntelligenceHealthCheck {
+  id: string;
+  reason: string;
+  sourceSystem: string;
+  status: IntelligenceTestStatus;
+  testName: string;
+}
+
 interface TimelineDraft {
   description: string;
   id: string;
@@ -840,6 +850,15 @@ export default function AICenter({
         analysis={eventAnalysis}
         analyzedEvent={analyzedEvent}
         scoped={analyzedWorkspace}
+      />
+
+      <IntelligenceTestSuite
+        analyzedEvent={analyzedEvent}
+        eventAnalysis={eventAnalysis}
+        financeReady={Boolean(eventAnalysis && analyzedWorkspace && analyzedEvent)}
+        sponsorActionDrafts={sponsorActionDrafts}
+        timelineDrafts={timelineDrafts}
+        workspaceInsights={workspaceInsights}
       />
 
       <TimelineDraftBuilder
@@ -1678,6 +1697,254 @@ function getFinanceSummary(
 
 function clampFinanceScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function IntelligenceTestSuite({
+  analyzedEvent,
+  eventAnalysis,
+  financeReady,
+  sponsorActionDrafts,
+  timelineDrafts,
+  workspaceInsights,
+}: {
+  analyzedEvent?: EventItem;
+  eventAnalysis: ReturnType<typeof getCopilotInsights> | null;
+  financeReady: boolean;
+  sponsorActionDrafts: SponsorActionDraft[];
+  timelineDrafts: TimelineDraft[];
+  workspaceInsights: ReturnType<typeof buildExecutiveInsights>;
+}) {
+  const tests = buildIntelligenceHealthChecks({
+    analyzedEvent,
+    eventAnalysis,
+    financeReady,
+    sponsorActionDrafts,
+    timelineDrafts,
+    workspaceInsights,
+  });
+  const counts = getIntelligenceTestCounts(tests);
+
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Intelligence Test Suite</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Read-only intelligence coverage checks</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Validates the AI Center intelligence outputs currently available on this page and highlights where more event data is needed.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+          No writes or execution
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <IntelligenceSummaryCard label="Passed Tests" value={counts.Pass} tone="success" />
+        <IntelligenceSummaryCard label="Warnings" value={counts.Warning} tone="warning" />
+        <IntelligenceSummaryCard label="Needs Data" value={counts["Needs Data"]} tone="primary" />
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {tests.map((test) => (
+          <article key={test.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getIntelligenceTestStatusClass(test.status)}`}>
+                Status: {test.status}
+              </span>
+              <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                Source System: {test.sourceSystem}
+              </span>
+            </div>
+            <p className="mt-4 text-xs uppercase tracking-[0.12em] text-app-muted">Test Name</p>
+            <h3 className="mt-1 break-words text-base font-semibold text-white">{test.testName}</h3>
+            <p className="mt-4 text-xs uppercase tracking-[0.12em] text-app-muted">Reason</p>
+            <p className="mt-1 break-words text-sm leading-6 text-app-muted">{test.reason}</p>
+            <p className="mt-4 break-words text-xs uppercase tracking-[0.12em] text-slate-400">
+              Source System: <span className="normal-case tracking-normal text-slate-200">{test.sourceSystem}</span>
+            </p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function IntelligenceSummaryCard({ label, tone, value }: { label: string; tone: "primary" | "success" | "warning"; value: number }) {
+  const toneClass = tone === "success"
+    ? "border-app-success/25 bg-app-success/10 text-green-100"
+    : tone === "warning"
+      ? "border-app-warning/25 bg-app-warning/10 text-amber-100"
+      : "border-app-primary/25 bg-app-primary/10 text-blue-100";
+
+  return (
+    <article className={`rounded-lg border p-4 ${toneClass}`}>
+      <p className="text-xs uppercase tracking-[0.12em]">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-white">{formatNumber(value)}</p>
+    </article>
+  );
+}
+
+function buildIntelligenceHealthChecks({
+  analyzedEvent,
+  eventAnalysis,
+  financeReady,
+  sponsorActionDrafts,
+  timelineDrafts,
+  workspaceInsights,
+}: {
+  analyzedEvent?: EventItem;
+  eventAnalysis: ReturnType<typeof getCopilotInsights> | null;
+  financeReady: boolean;
+  sponsorActionDrafts: SponsorActionDraft[];
+  timelineDrafts: TimelineDraft[];
+  workspaceInsights: ReturnType<typeof buildExecutiveInsights>;
+}): IntelligenceHealthCheck[] {
+  return [
+    buildWorkspaceIntelligenceCheck(workspaceInsights),
+    buildEventIntelligenceCheck(analyzedEvent, eventAnalysis),
+    buildSponsorIntelligenceCheck(workspaceInsights, eventAnalysis, sponsorActionDrafts),
+    buildTimelineIntelligenceCheck(analyzedEvent, timelineDrafts),
+    buildFinanceIntelligenceCheck(analyzedEvent, financeReady),
+  ];
+}
+
+function buildWorkspaceIntelligenceCheck(workspaceInsights: ReturnType<typeof buildExecutiveInsights>): IntelligenceHealthCheck {
+  if (workspaceInsights.summary.length > 0) {
+    return {
+      id: "workspace-intelligence",
+      reason: workspaceInsights.revenueAtRisk > 0
+        ? `Revenue forecast available with ${formatCurrency(workspaceInsights.revenueAtRisk)} currently at risk.`
+        : "Workspace health and executive summary signals are available.",
+      sourceSystem: "Workspace Intelligence",
+      status: "Pass",
+      testName: "Workspace Intelligence",
+    };
+  }
+
+  return {
+    id: "workspace-intelligence",
+    reason: "Add workspace events, finance, sponsor, ticket, or task data to generate stronger executive intelligence.",
+    sourceSystem: "Workspace Intelligence",
+    status: "Needs Data",
+    testName: "Workspace Intelligence",
+  };
+}
+
+function buildEventIntelligenceCheck(
+  analyzedEvent: EventItem | undefined,
+  eventAnalysis: ReturnType<typeof getCopilotInsights> | null,
+): IntelligenceHealthCheck {
+  if (!analyzedEvent) {
+    return {
+      id: "event-intelligence",
+      reason: "No selected event. Choose an event and run analysis to validate event-level intelligence.",
+      sourceSystem: "Event Analyzer",
+      status: "Warning",
+      testName: "Event Intelligence",
+    };
+  }
+
+  return {
+    id: "event-intelligence",
+    reason: eventAnalysis
+      ? `Event analysis is available for ${analyzedEvent.name}.`
+      : `Select Run Analysis for ${analyzedEvent.name} to populate event intelligence outputs.`,
+    sourceSystem: "Event Analyzer",
+    status: eventAnalysis ? "Pass" : "Warning",
+    testName: "Event Intelligence",
+  };
+}
+
+function buildSponsorIntelligenceCheck(
+  workspaceInsights: ReturnType<typeof buildExecutiveInsights>,
+  eventAnalysis: ReturnType<typeof getCopilotInsights> | null,
+  sponsorActionDrafts: SponsorActionDraft[],
+): IntelligenceHealthCheck {
+  if (sponsorActionDrafts.length > 0) {
+    return {
+      id: "sponsor-intelligence",
+      reason: `${formatNumber(sponsorActionDrafts.length)} sponsor action ${sponsorActionDrafts.length === 1 ? "draft is" : "drafts are"} generated from current sponsor signals.`,
+      sourceSystem: "Sponsor Action Drafts",
+      status: "Pass",
+      testName: "Sponsor Intelligence",
+    };
+  }
+
+  if (workspaceInsights.sponsorPipeline.activeDeals > 0 || eventAnalysis?.sponsorAdvisor.opportunityValue) {
+    return {
+      id: "sponsor-intelligence",
+      reason: "Sponsor intelligence is available, but no sponsor action drafts are currently generated.",
+      sourceSystem: "Sponsor Action Drafts",
+      status: "Warning",
+      testName: "Sponsor Intelligence",
+    };
+  }
+
+  return {
+    id: "sponsor-intelligence",
+    reason: "No sponsor pipeline data is available yet.",
+    sourceSystem: "Sponsor Action Drafts",
+    status: "Needs Data",
+    testName: "Sponsor Intelligence",
+  };
+}
+
+function buildTimelineIntelligenceCheck(analyzedEvent: EventItem | undefined, timelineDrafts: TimelineDraft[]): IntelligenceHealthCheck {
+  if (timelineDrafts.length > 0) {
+    return {
+      id: "timeline-intelligence",
+      reason: `${formatNumber(timelineDrafts.length)} timeline ${timelineDrafts.length === 1 ? "draft is" : "drafts are"} generated for the selected event.`,
+      sourceSystem: "Timeline Draft Builder",
+      status: "Pass",
+      testName: "Timeline Intelligence",
+    };
+  }
+
+  return {
+    id: "timeline-intelligence",
+    reason: analyzedEvent ? "Timeline drafts have not been generated for this event yet." : "Select and analyze an event to generate timeline drafts.",
+    sourceSystem: "Timeline Draft Builder",
+    status: analyzedEvent ? "Warning" : "Needs Data",
+    testName: "Timeline Intelligence",
+  };
+}
+
+function buildFinanceIntelligenceCheck(analyzedEvent: EventItem | undefined, financeReady: boolean): IntelligenceHealthCheck {
+  if (financeReady) {
+    return {
+      id: "finance-intelligence",
+      reason: "Financial score generated from the selected event's existing finance, ticket, sponsor, and expense signals.",
+      sourceSystem: "Finance Risk Explainer",
+      status: "Pass",
+      testName: "Finance Intelligence",
+    };
+  }
+
+  return {
+    id: "finance-intelligence",
+    reason: analyzedEvent ? "Run analysis to generate finance risk signals for the selected event." : "No selected event for finance risk validation.",
+    sourceSystem: "Finance Risk Explainer",
+    status: analyzedEvent ? "Warning" : "Needs Data",
+    testName: "Finance Intelligence",
+  };
+}
+
+function getIntelligenceTestCounts(tests: IntelligenceHealthCheck[]) {
+  return tests.reduce<Record<IntelligenceTestStatus, number>>((counts, test) => ({
+    ...counts,
+    [test.status]: counts[test.status] + 1,
+  }), {
+    "Needs Data": 0,
+    Pass: 0,
+    Warning: 0,
+  });
+}
+
+function getIntelligenceTestStatusClass(status: IntelligenceTestStatus) {
+  if (status === "Pass") return "border-app-success/30 bg-app-success/12 text-green-100";
+  if (status === "Warning") return "border-app-warning/30 bg-app-warning/12 text-amber-100";
+  return "border-app-primary/30 bg-app-primary/12 text-blue-100";
 }
 
 function TimelineDraftBuilder({
