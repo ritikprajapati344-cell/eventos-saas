@@ -85,6 +85,7 @@ interface AITaskDraft {
   id: string;
   priority: "High" | "Medium" | "Low";
   sourceProposal: string;
+  targetEvent: string;
   title: string;
 }
 
@@ -119,6 +120,10 @@ interface SponsorActionDraft {
   title: string;
 }
 
+type ExecutableProposal = AIActionProposal & {
+  targetEvent?: string;
+};
+
 export default function AICenter({
   activitiesData,
   data,
@@ -149,6 +154,8 @@ export default function AICenter({
   const [analyzedEventId, setAnalyzedEventId] = useState("");
   const [selectedProposalIds, setSelectedProposalIds] = useState<string[]>([]);
   const [approvedProposalIds, setApprovedProposalIds] = useState<string[]>([]);
+  const [selectedSponsorDraftIds, setSelectedSponsorDraftIds] = useState<string[]>([]);
+  const [approvedSponsorDraftIds, setApprovedSponsorDraftIds] = useState<string[]>([]);
   const [createdExecutionDraftIds, setCreatedExecutionDraftIds] = useState<string[]>([]);
   const [executionEventId, setExecutionEventId] = useState("");
   const [showTaskCreateConfirm, setShowTaskCreateConfirm] = useState(false);
@@ -189,9 +196,20 @@ export default function AICenter({
     () => actionProposals.filter((proposal) => approvedProposalIds.includes(proposal.id)),
     [actionProposals, approvedProposalIds],
   );
+  const approvedSponsorActionDrafts = useMemo(
+    () => sponsorActionDrafts.filter((draft) => approvedSponsorDraftIds.includes(draft.id)),
+    [approvedSponsorDraftIds, sponsorActionDrafts],
+  );
+  const executionProposals = useMemo(
+    () => [
+      ...approvedActionProposals,
+      ...approvedSponsorActionDrafts.map(toExecutableSponsorProposal),
+    ],
+    [approvedActionProposals, approvedSponsorActionDrafts],
+  );
   const executionDrafts = useMemo(
-    () => buildExecutionTaskDrafts(approvedActionProposals),
-    [approvedActionProposals],
+    () => buildExecutionTaskDrafts(executionProposals),
+    [executionProposals],
   );
   const creatableExecutionDrafts = useMemo(
     () => executionDrafts.filter((draft) => !createdExecutionDraftIds.includes(draft.id)),
@@ -203,26 +221,37 @@ export default function AICenter({
       actionProposals,
       analyzedEventName: analyzedEvent?.name,
       approvedProposalIds,
+      approvedSponsorDraftIds,
       createdExecutionDraftIds,
       executionHistory,
       executionTargetEventName,
+      sponsorActionDrafts,
     }),
     [
       actionProposals,
       analyzedEvent?.name,
       approvedProposalIds,
+      approvedSponsorDraftIds,
       createdExecutionDraftIds,
       executionHistory,
       executionTargetEventName,
+      sponsorActionDrafts,
     ],
   );
 
   useEffect(() => {
     const activeProposalIds = new Set(actionProposals.map((proposal) => proposal.id));
+    const activeExecutionDraftIds = new Set(executionDrafts.map((draft) => draft.id));
     setSelectedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
     setApprovedProposalIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
-    setCreatedExecutionDraftIds((current) => current.filter((proposalId) => activeProposalIds.has(proposalId)));
-  }, [actionProposals]);
+    setCreatedExecutionDraftIds((current) => current.filter((proposalId) => activeExecutionDraftIds.has(proposalId)));
+  }, [actionProposals, executionDrafts]);
+
+  useEffect(() => {
+    const activeSponsorDraftIds = new Set(sponsorActionDrafts.map((draft) => draft.id));
+    setSelectedSponsorDraftIds((current) => current.filter((draftId) => activeSponsorDraftIds.has(draftId)));
+    setApprovedSponsorDraftIds((current) => current.filter((draftId) => activeSponsorDraftIds.has(draftId)));
+  }, [sponsorActionDrafts]);
 
   useEffect(() => {
     if (data.events.length === 0) {
@@ -639,7 +668,21 @@ export default function AICenter({
         selectedProposalIds={selectedProposalIds}
       />
 
-      <SponsorActionDrafts drafts={sponsorActionDrafts} />
+      <SponsorActionDrafts
+        approvedDraftIds={approvedSponsorDraftIds}
+        drafts={sponsorActionDrafts}
+        onApproveSelected={() => {
+          setApprovedSponsorDraftIds((current) => Array.from(new Set([...current, ...selectedSponsorDraftIds])));
+        }}
+        onToggleDraft={(draftId) => {
+          setSelectedSponsorDraftIds((current) => (
+            current.includes(draftId)
+              ? current.filter((selectedId) => selectedId !== draftId)
+              : [...current, draftId]
+          ));
+        }}
+        selectedDraftIds={selectedSponsorDraftIds}
+      />
 
       <AIApprovalQueue items={approvalQueueItems} />
 
@@ -1184,20 +1227,60 @@ function AIActionProposals({
   );
 }
 
-function SponsorActionDrafts({ drafts }: { drafts: SponsorActionDraft[] }) {
+function SponsorActionDrafts({
+  approvedDraftIds,
+  drafts,
+  onApproveSelected,
+  onToggleDraft,
+  selectedDraftIds,
+}: {
+  approvedDraftIds: string[];
+  drafts: SponsorActionDraft[];
+  onApproveSelected: () => void;
+  onToggleDraft: (draftId: string) => void;
+  selectedDraftIds: string[];
+}) {
+  const selectedCount = selectedDraftIds.length;
+  const approvedSelectedCount = selectedDraftIds.filter((draftId) => approvedDraftIds.includes(draftId)).length;
+  const approvalStatus = approvedSelectedCount > 0
+    ? "Approved for task execution"
+    : "Ready for task draft approval";
+
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Sponsor Action Drafts</p>
-          <h2 className="mt-1 text-xl font-semibold text-white">Read-only sponsor next steps</h2>
+          <h2 className="mt-1 text-xl font-semibold text-white">Sponsor task draft approvals</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
-            Informational sponsor actions assembled from existing workspace and event sponsor intelligence.
+            Sponsor actions are converted only into task drafts. Sponsor records are never created or updated here.
           </p>
         </div>
-        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
-          Draft Only
-        </span>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-app-primary px-3 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={selectedCount === 0}
+            onClick={onApproveSelected}
+            type="button"
+          >
+            <ShieldAlert size={16} />
+            Approve Sponsor Drafts
+          </button>
+          <p className="text-xs text-app-muted">Approved sponsor drafts appear in Execution Preview as tasks.</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
+        <div className="rounded-lg border border-app-primary/20 bg-app-primary/10 p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-blue-100">Selected Sponsor Drafts</p>
+          <p className="mt-2 text-2xl font-semibold text-white">{formatNumber(selectedCount)}</p>
+          <p className="mt-1 text-sm text-app-muted">Total selected sponsor actions: {formatNumber(selectedCount)}</p>
+        </div>
+        <div className="rounded-lg border border-app-warning/25 bg-app-warning/10 p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-amber-100">Sponsor approval status</p>
+          <p className="mt-2 break-words text-base font-semibold text-white">{approvalStatus}</p>
+          <p className="mt-1 text-sm text-app-muted">Execution creates tasks only. No sponsor data is changed.</p>
+        </div>
       </div>
 
       {drafts.length === 0 ? (
@@ -1206,26 +1289,40 @@ function SponsorActionDrafts({ drafts }: { drafts: SponsorActionDraft[] }) {
         </div>
       ) : (
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          {drafts.map((draft) => (
-            <article key={draft.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.expectedImpact)}`}>
-                  {draft.expectedImpact} impact
-                </span>
-                <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
-                  Source: AI Center
-                </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200">
-                  Status: Draft Only
-                </span>
-              </div>
-              <h3 className="mt-4 break-words text-base font-semibold text-white">{draft.title}</h3>
-              <p className="mt-2 break-words text-sm leading-6 text-app-muted">{draft.reason}</p>
-              <p className="mt-4 break-words text-xs uppercase tracking-[0.12em] text-slate-400">
-                Target Event: <span className="normal-case tracking-normal text-slate-200">{draft.targetEvent}</span>
-              </p>
-            </article>
-          ))}
+          {drafts.map((draft) => {
+            const isSelected = selectedDraftIds.includes(draft.id);
+            const isApproved = approvedDraftIds.includes(draft.id);
+
+            return (
+              <article key={draft.id} className={`rounded-lg border p-4 transition ${isSelected ? "border-app-primary/45 bg-app-primary/10" : "border-white/10 bg-white/[0.035]"}`}>
+                <label className="mb-4 flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2">
+                  <input
+                    checked={isSelected}
+                    className="h-4 w-4 rounded border-app-primary/45 bg-slate-950 text-app-primary focus:ring-app-primary/35"
+                    onChange={() => onToggleDraft(draft.id)}
+                    type="checkbox"
+                  />
+                  <span className="text-sm font-medium text-slate-100">Select sponsor action</span>
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.expectedImpact)}`}>
+                    {draft.expectedImpact} impact
+                  </span>
+                  <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                    Source: AI Center
+                  </span>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${isApproved ? "border-app-success/30 bg-app-success/12 text-green-100" : "border-white/10 bg-white/[0.04] text-slate-300"}`}>
+                    Status: {isApproved ? "Approved" : "Draft Only"}
+                  </span>
+                </div>
+                <h3 className="mt-4 break-words text-base font-semibold text-white">{draft.title}</h3>
+                <p className="mt-2 break-words text-sm leading-6 text-app-muted">{draft.reason}</p>
+                <p className="mt-4 break-words text-xs uppercase tracking-[0.12em] text-slate-400">
+                  Target Event: <span className="normal-case tracking-normal text-slate-200">{draft.targetEvent}</span>
+                </p>
+              </article>
+            );
+          })}
         </div>
       )}
     </section>
@@ -1341,7 +1438,7 @@ function ExecutionPreview({
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Execution Preview</p>
           <h2 className="mt-1 text-xl font-semibold text-white">Task drafts from approved proposals</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
-            Draft-only execution preview. These items are generated only from approved AI Action Proposals.
+            Draft-only execution preview. These items are generated only from approved AI Action Proposals and Sponsor Action Drafts.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
@@ -1417,6 +1514,10 @@ function ExecutionPreview({
                 <div>
                   <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Source Proposal</dt>
                   <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceProposal}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Target Event</dt>
+                  <dd className="mt-1 break-words text-sm font-medium text-white">{draft.targetEvent}</dd>
                 </div>
               </dl>
                   </>
@@ -1739,16 +1840,20 @@ function buildAIApprovalQueueItems({
   actionProposals,
   analyzedEventName,
   approvedProposalIds,
+  approvedSponsorDraftIds,
   createdExecutionDraftIds,
   executionHistory,
   executionTargetEventName,
+  sponsorActionDrafts,
 }: {
   actionProposals: AIActionProposal[];
   analyzedEventName?: string;
   approvedProposalIds: string[];
+  approvedSponsorDraftIds: string[];
   createdExecutionDraftIds: string[];
   executionHistory: AIExecutionHistoryEntry[];
   executionTargetEventName: string;
+  sponsorActionDrafts: SponsorActionDraft[];
 }): AIApprovalQueueItem[] {
   const proposalItems = actionProposals.map((proposal) => {
     const isExecuted = createdExecutionDraftIds.includes(proposal.id);
@@ -1767,6 +1872,21 @@ function buildAIApprovalQueueItems({
     } satisfies AIApprovalQueueItem;
   });
 
+  const sponsorItems = sponsorActionDrafts.map((draft) => {
+    const taskDraftId = getSponsorExecutionDraftId(draft.id);
+    const isExecuted = createdExecutionDraftIds.includes(taskDraftId);
+    const isApproved = approvedSponsorDraftIds.includes(draft.id);
+
+    return {
+      id: `sponsor-${draft.id}`,
+      impact: draft.expectedImpact,
+      source: "AI Center",
+      status: isExecuted ? "Executed" : isApproved ? "Approved" : "Proposed",
+      targetEvent: draft.targetEvent,
+      title: draft.title,
+    } satisfies AIApprovalQueueItem;
+  });
+
   const historyItems = executionHistory.map((entry) => ({
     id: `history-${entry.id}`,
     impact: entry.status === "Undone" ? "Low" : "Medium",
@@ -1776,7 +1896,7 @@ function buildAIApprovalQueueItems({
     title: `${formatNumber(entry.taskCount)} AI-created tasks`,
   }) satisfies AIApprovalQueueItem);
 
-  return [...proposalItems, ...historyItems];
+  return [...proposalItems, ...sponsorItems, ...historyItems];
 }
 
 function getApprovalQueueCounts(items: AIApprovalQueueItem[]) {
@@ -1800,15 +1920,31 @@ function getApprovalQueueStatusClass(status: AIApprovalQueueStatus) {
   return "border-white/10 bg-white/[0.04] text-slate-300";
 }
 
-function buildExecutionTaskDrafts(proposals: AIActionProposal[]): AITaskDraft[] {
+function buildExecutionTaskDrafts(proposals: ExecutableProposal[]): AITaskDraft[] {
   return proposals.map((proposal) => ({
     description: proposal.reason,
     dueDate: getSuggestedDraftDueDate(proposal.impact),
     id: proposal.id,
     priority: proposal.impact,
     sourceProposal: proposal.title,
+    targetEvent: proposal.targetEvent ?? "Selected execution event",
     title: proposal.title,
   }));
+}
+
+function toExecutableSponsorProposal(draft: SponsorActionDraft): ExecutableProposal {
+  return {
+    id: getSponsorExecutionDraftId(draft.id),
+    impact: draft.expectedImpact,
+    reason: draft.reason,
+    source: "Workspace",
+    targetEvent: draft.targetEvent,
+    title: `Sponsor: ${draft.title}`,
+  };
+}
+
+function getSponsorExecutionDraftId(draftId: string) {
+  return `sponsor-action-${draftId}`;
 }
 
 function getSuggestedDraftDueDate(impact: AIActionProposal["impact"]) {
