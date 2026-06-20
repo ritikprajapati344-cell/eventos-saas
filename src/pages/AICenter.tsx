@@ -836,6 +836,12 @@ export default function AICenter({
         analyzedEvent={analyzedEvent}
       />
 
+      <FinanceRiskExplainer
+        analysis={eventAnalysis}
+        analyzedEvent={analyzedEvent}
+        scoped={analyzedWorkspace}
+      />
+
       <TimelineDraftBuilder
         approvedDraftIds={approvedTimelineDraftIds}
         drafts={timelineDrafts}
@@ -1360,6 +1366,320 @@ function EventReadinessActionPlan({
     </section>
   );
 }
+function FinanceRiskExplainer({
+  analysis,
+  analyzedEvent,
+  scoped,
+}: {
+  analysis: ReturnType<typeof getCopilotInsights> | null;
+  analyzedEvent?: EventItem;
+  scoped: ReturnType<typeof calculateEventWorkspace> | null;
+}) {
+  const targetEvent = analyzedEvent?.name ?? "Selected event";
+  const finance = analysis && scoped && analyzedEvent ? buildFinanceRiskExplainer(analysis, scoped, targetEvent) : null;
+
+  return (
+    <section className="glass-panel rounded-lg p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Finance Risk Explainer</p>
+          <h2 className="mt-1 text-xl font-semibold text-white">Financial risk signals</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+            Read-only finance interpretation built from the selected event's current revenue, sponsor, ticket, and expense signals.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+          Recommendation only
+        </span>
+      </div>
+
+      {!finance ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          Run analysis for an event to see finance risk signals.
+        </div>
+      ) : (
+        <div className="mt-5 space-y-5">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <WorkspaceMetric
+              helper="Financial health from existing EventOS revenue, expense, sponsor, and ticket signals"
+              icon={TrendingUp}
+              title="Financial Health Score"
+              tone={finance.tone}
+              value={`${finance.score}/100`}
+            />
+            <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4 md:col-span-1 xl:col-span-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Financial Summary</p>
+              <p className="mt-3 break-words text-lg font-semibold text-white">{finance.summary}</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <FinanceSignal label="Expected revenue" value={formatCurrency(finance.expectedRevenue)} />
+                <FinanceSignal label="Recorded revenue" value={formatCurrency(finance.recordedRevenue)} />
+                <FinanceSignal label="Actual expense" value={formatCurrency(finance.actualExpense)} />
+                <FinanceSignal label="Actual profit" value={formatCurrency(finance.actualProfit)} />
+              </div>
+              <p className="mt-4 break-words text-xs uppercase tracking-[0.12em] text-slate-400">
+                Target Event: <span className="normal-case tracking-normal text-slate-200">{targetEvent}</span>
+              </p>
+            </article>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Financial Risks</p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {finance.risks.map((risk) => (
+                <article key={risk.title} className="rounded-lg border border-white/10 bg-slate-950/30 p-4">
+                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getReadinessToneClass(risk.tone)}`}>
+                    {risk.label}
+                  </span>
+                  <h3 className="mt-3 text-sm font-semibold text-white">{risk.title}</h3>
+                  <p className="mt-2 break-words text-sm leading-6 text-app-muted">{risk.reason}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Financial Recommendations</p>
+                <h3 className="mt-1 text-lg font-semibold text-white">Read-only actions to consider</h3>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+                {formatNumber(finance.recommendations.length)} recommendations
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {finance.recommendations.map((recommendation) => (
+                <article key={recommendation.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(recommendation.severity)}`}>
+                      {recommendation.severity} severity
+                    </span>
+                    <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                      Source: Finance Risk Explainer
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200">
+                      Status: Recommendation
+                    </span>
+                  </div>
+                  <h4 className="mt-4 break-words text-base font-semibold text-white">{recommendation.title}</h4>
+                  <p className="mt-2 break-words text-sm leading-6 text-app-muted">{recommendation.reason}</p>
+                  <p className="mt-4 break-words text-xs uppercase tracking-[0.12em] text-slate-400">
+                    Target Event: <span className="normal-case tracking-normal text-slate-200">{recommendation.targetEvent}</span>
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FinanceSignal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-3">
+      <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function buildFinanceRiskExplainer(
+  analysis: ReturnType<typeof getCopilotInsights>,
+  scoped: ReturnType<typeof calculateEventWorkspace>,
+  targetEvent: string,
+) {
+  const expectedRevenue = analysis.revenueAdvisor.expectedRevenue;
+  const recordedRevenue = analysis.revenueAdvisor.recordedRevenue;
+  const revenueGap = Math.max(analysis.revenueAdvisor.revenueGap, 0);
+  const sponsorGap = Math.max(analysis.sponsorAdvisor.sponsorGap, 0);
+  const expensePressure = scoped.expectedExpense > 0 ? scoped.actualExpense / scoped.expectedExpense : scoped.actualExpense > 0 ? 1 : 0;
+  const profitPressure = scoped.actualProfit < 0 || scoped.expectedProfit < 0;
+  const revenueProgress = expectedRevenue > 0 ? Math.min(recordedRevenue / expectedRevenue, 1) : recordedRevenue > 0 ? 1 : 0;
+  const score = clampFinanceScore(
+    48
+      + revenueProgress * 34
+      + (scoped.actualProfit > 0 ? 10 : 0)
+      - (expensePressure > 1 ? 14 : expensePressure > 0.8 ? 7 : 0)
+      - (revenueGap > 0 ? 10 : 0)
+      - (sponsorGap > 0 ? 8 : 0)
+      - (analysis.ticket.tone === "danger" ? 10 : analysis.ticket.tone === "warning" ? 5 : 0)
+      - (profitPressure ? 12 : 0),
+  );
+  const tone: "danger" | "primary" | "success" | "warning" = score >= 75 ? "success" : score >= 55 ? "primary" : score >= 40 ? "warning" : "danger";
+  const risks = buildFinanceRisks(analysis, scoped);
+  const recommendations = buildFinanceRecommendations(analysis, scoped, targetEvent);
+
+  return {
+    actualExpense: scoped.actualExpense,
+    actualProfit: scoped.actualProfit,
+    expectedRevenue,
+    recordedRevenue,
+    recommendations,
+    risks,
+    score,
+    summary: getFinanceSummary(analysis, scoped, revenueGap, expensePressure, profitPressure),
+    tone,
+  };
+}
+
+function buildFinanceRisks(
+  analysis: ReturnType<typeof getCopilotInsights>,
+  scoped: ReturnType<typeof calculateEventWorkspace>,
+) {
+  const risks: Array<{ label: string; reason: string; title: string; tone: "danger" | "primary" | "success" | "warning" }> = [];
+
+  if (analysis.revenueAdvisor.revenueGap > 0) {
+    risks.push({
+      label: "Revenue gap",
+      reason: `${formatCurrency(analysis.revenueAdvisor.revenueGap)} remains between projected and recorded income. ${analysis.revenueAdvisor.suggestedAction}`,
+      title: "Revenue gap",
+      tone: analysis.revenueAdvisor.tone,
+    });
+  }
+
+  if (analysis.sponsorAdvisor.sponsorGap > 0 || analysis.sponsorAdvisor.opportunityValue > 0) {
+    risks.push({
+      label: analysis.sponsorAdvisor.sponsorGap > 0 ? "Sponsor gap" : "Sponsor upside",
+      reason: `Sponsor gap is ${formatCurrency(analysis.sponsorAdvisor.sponsorGap)} with ${formatCurrency(analysis.sponsorAdvisor.opportunityValue)} estimated opportunity still available.`,
+      title: "Sponsor dependency",
+      tone: analysis.sponsorAdvisor.tone,
+    });
+  }
+
+  if (scoped.actualExpense > scoped.expectedExpense && scoped.actualExpense > 0) {
+    risks.push({
+      label: "Expense pressure",
+      reason: `Actual expenses are ${formatCurrency(scoped.actualExpense)}, above expected expenses of ${formatCurrency(scoped.expectedExpense)}.`,
+      title: "Expense pressure",
+      tone: "warning",
+    });
+  }
+
+  if (analysis.ticket.tone === "danger" || analysis.ticket.tone === "warning") {
+    risks.push({
+      label: analysis.ticket.value,
+      reason: analysis.ticket.helper,
+      title: "Ticket sales weakness",
+      tone: analysis.ticket.tone,
+    });
+  }
+
+  if (scoped.actualProfit < 0 || scoped.expectedProfit < 0) {
+    risks.push({
+      label: "Profit risk",
+      reason: `Current actual profit is ${formatCurrency(scoped.actualProfit)} and expected profit is ${formatCurrency(scoped.expectedProfit)}.`,
+      title: "Profit risk",
+      tone: "danger",
+    });
+  }
+
+  if (risks.length === 0) {
+    risks.push({
+      label: "Stable",
+      reason: "No major finance risk is flagged by the current event revenue, expense, sponsor, and ticket signals.",
+      title: "Strong financial position",
+      tone: "success",
+    });
+  }
+
+  return risks.slice(0, 5);
+}
+
+function buildFinanceRecommendations(
+  analysis: ReturnType<typeof getCopilotInsights>,
+  scoped: ReturnType<typeof calculateEventWorkspace>,
+  targetEvent: string,
+) {
+  const recommendations: Array<{ id: string; reason: string; severity: AIActionProposal["impact"]; targetEvent: string; title: string }> = [];
+  const addRecommendation = (recommendation: { id: string; reason: string; severity: AIActionProposal["impact"]; targetEvent: string; title: string }) => {
+    if (!recommendations.some((item) => item.id === recommendation.id)) recommendations.push(recommendation);
+  };
+
+  if (analysis.sponsorAdvisor.sponsorGap > 0 || analysis.sponsorAdvisor.opportunityValue > 0) {
+    addRecommendation({
+      id: "finance-increase-sponsor-outreach",
+      reason: `Sponsor opportunity is ${formatCurrency(analysis.sponsorAdvisor.opportunityValue)} and the current sponsor gap is ${formatCurrency(analysis.sponsorAdvisor.sponsorGap)}.`,
+      severity: analysis.sponsorAdvisor.sponsorGap > 0 ? "High" : "Medium",
+      targetEvent,
+      title: "Increase sponsor outreach",
+    });
+  }
+
+  if (scoped.actualExpense > scoped.expectedExpense && scoped.actualExpense > 0) {
+    addRecommendation({
+      id: "finance-review-expenses",
+      reason: `Actual expenses are running above expected expense exposure by ${formatCurrency(Math.max(scoped.actualExpense - scoped.expectedExpense, 0))}.`,
+      severity: "High",
+      targetEvent,
+      title: "Review expenses",
+    });
+  }
+
+  if (analysis.ticket.tone === "danger" || analysis.ticket.tone === "warning") {
+    addRecommendation({
+      id: "finance-improve-ticket-conversion",
+      reason: analysis.ticket.helper,
+      severity: analysis.ticket.tone === "danger" ? "High" : "Medium",
+      targetEvent,
+      title: "Improve ticket conversion",
+    });
+  }
+
+  if (scoped.actualProfit < 0 || scoped.expectedProfit < 0) {
+    addRecommendation({
+      id: "finance-reduce-cost-exposure",
+      reason: `Profit is under pressure with actual profit at ${formatCurrency(scoped.actualProfit)} and expected profit at ${formatCurrency(scoped.expectedProfit)}.`,
+      severity: "High",
+      targetEvent,
+      title: "Reduce cost exposure",
+    });
+  }
+
+  if (analysis.revenueAdvisor.revenueGap > 0) {
+    addRecommendation({
+      id: "finance-improve-payment-collection",
+      reason: analysis.revenueAdvisor.suggestedAction,
+      severity: analysis.revenueAdvisor.revenueGap > analysis.revenueAdvisor.expectedRevenue * 0.35 ? "High" : "Medium",
+      targetEvent,
+      title: "Improve payment collection",
+    });
+  }
+
+  if (recommendations.length === 0) {
+    addRecommendation({
+      id: "finance-maintain-review-cadence",
+      reason: "Finance signals look stable. Keep monitoring revenue, expense, ticket, and sponsor movement as the event progresses.",
+      severity: "Low",
+      targetEvent,
+      title: "Maintain finance review cadence",
+    });
+  }
+
+  return recommendations.slice(0, 5);
+}
+
+function getFinanceSummary(
+  analysis: ReturnType<typeof getCopilotInsights>,
+  scoped: ReturnType<typeof calculateEventWorkspace>,
+  revenueGap: number,
+  expensePressure: number,
+  profitPressure: boolean,
+) {
+  if (!profitPressure && revenueGap <= 0 && scoped.actualProfit >= 0) return "Strong financial position";
+  if (scoped.actualExpense > scoped.actualRevenue && scoped.actualExpense > 0) return "Expenses growing faster than income";
+  if (profitPressure || expensePressure > 1) return "Profit margin under pressure";
+  if (revenueGap > 0) return "Revenue target at risk";
+  if (analysis.revenueAdvisor.recordedRevenue >= analysis.revenueAdvisor.expectedRevenue && analysis.revenueAdvisor.expectedRevenue > 0) return "Revenue target on track";
+  return "Finance signals need continued review";
+}
+
+function clampFinanceScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
 function TimelineDraftBuilder({
   approvedDraftIds,
   drafts,
@@ -3812,5 +4132,3 @@ function getErrorMessage(error: unknown, fallback: string) {
   }
   return fallback;
 }
-
-
