@@ -6,12 +6,14 @@ import type { ActivitiesDataSource } from "../hooks/useActivitiesData";
 import type { EventsDataSource } from "../hooks/useEventsData";
 import type { TasksDataSource } from "../hooks/useTasksData";
 import type { TicketingDataSource } from "../hooks/useTicketingData";
+import { useAuth } from "../hooks/useAuth";
 import { getCopilotInsights } from "../intelligence/eventCopilot";
 import { calculateEventWorkspace } from "../intelligence/eventWorkspace";
 import { buildExecutiveInsights } from "../intelligence/executiveSummary";
 import { generateAIEventPlan, type AICenterBackendMode, type AIEventPlan } from "../lib/aiCenterClient";
+import { createWorkspaceTimelineItem, deleteWorkspaceTimelineItem } from "../lib/timelineRepository";
 import type { FinanceTransactionRecord } from "../lib/financeTransactionsRepository";
-import type { EventItem, EventOSData, EventType, Task, TicketCategory } from "../types";
+import type { EventItem, EventOSData, EventType, Task, TicketCategory, TimelineItem } from "../types";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
 const mockPlan = {
@@ -91,6 +93,7 @@ interface AITaskDraft {
 
 interface AIExecutionHistoryEntry {
   createdAt: string;
+  entryType?: "tasks" | "timeline";
   id: string;
   source: "AI Center";
   status: "Success" | "Undone";
@@ -98,6 +101,10 @@ interface AIExecutionHistoryEntry {
   taskCount: number;
   taskIds?: string[];
   taskTitles: string[];
+  timelineDraftIds?: string[];
+  timelineItemCount?: number;
+  timelineItemIds?: string[];
+  timelineItemTitles?: string[];
   undoneAt?: string;
 }
 
@@ -138,6 +145,8 @@ interface TimelineDraft {
   title: string;
 }
 
+type TimelineExecutionDraft = TimelineDraft;
+
 type ExecutableProposal = AIActionProposal & {
   targetEvent?: string;
 };
@@ -152,6 +161,7 @@ export default function AICenter({
   ticketingData,
 }: AICenterProps) {
   const navigate = useNavigate();
+  const { workspaceId } = useAuth();
   const [backendMode, setBackendMode] = useState<AICenterBackendMode | "frontend-fallback">("frontend-fallback");
   const [backendMessage, setBackendMessage] = useState("");
   const [fallbackMessage, setFallbackMessage] = useState("");
@@ -174,12 +184,19 @@ export default function AICenter({
   const [approvedProposalIds, setApprovedProposalIds] = useState<string[]>([]);
   const [selectedSponsorDraftIds, setSelectedSponsorDraftIds] = useState<string[]>([]);
   const [approvedSponsorDraftIds, setApprovedSponsorDraftIds] = useState<string[]>([]);
+  const [selectedTimelineDraftIds, setSelectedTimelineDraftIds] = useState<string[]>([]);
+  const [approvedTimelineDraftIds, setApprovedTimelineDraftIds] = useState<string[]>([]);
   const [createdExecutionDraftIds, setCreatedExecutionDraftIds] = useState<string[]>([]);
+  const [createdTimelineDraftIds, setCreatedTimelineDraftIds] = useState<string[]>([]);
   const [executionEventId, setExecutionEventId] = useState("");
   const [showTaskCreateConfirm, setShowTaskCreateConfirm] = useState(false);
   const [isCreatingTasks, setIsCreatingTasks] = useState(false);
   const [taskCreateError, setTaskCreateError] = useState("");
   const [taskCreateMessage, setTaskCreateMessage] = useState("");
+  const [showTimelineCreateConfirm, setShowTimelineCreateConfirm] = useState(false);
+  const [isCreatingTimelineItems, setIsCreatingTimelineItems] = useState(false);
+  const [timelineCreateError, setTimelineCreateError] = useState("");
+  const [timelineCreateMessage, setTimelineCreateMessage] = useState("");
   const [executionHistory, setExecutionHistory] = useState<AIExecutionHistoryEntry[]>(loadExecutionHistory);
   const [undoExecutionId, setUndoExecutionId] = useState("");
   const [isUndoingTasks, setIsUndoingTasks] = useState(false);
@@ -202,6 +219,11 @@ export default function AICenter({
     () => (analyzedEvent && analyzedWorkspace ? getCopilotInsights(analyzedEvent, analyzedWorkspace) : null),
     [analyzedEvent, analyzedWorkspace],
   );
+  const timelineTargetEventName = analyzedEvent?.name ?? "Selected event";
+  const timelineDrafts = useMemo(
+    () => (eventAnalysis ? buildTimelineDrafts(eventAnalysis, timelineTargetEventName) : []),
+    [eventAnalysis, timelineTargetEventName],
+  );
   const actionProposals = useMemo(
     () => buildAIActionProposals(workspaceInsights, eventAnalysis, analyzedEvent),
     [workspaceInsights, eventAnalysis, analyzedEvent],
@@ -218,6 +240,10 @@ export default function AICenter({
     () => sponsorActionDrafts.filter((draft) => approvedSponsorDraftIds.includes(draft.id)),
     [approvedSponsorDraftIds, sponsorActionDrafts],
   );
+  const approvedTimelineDrafts = useMemo(
+    () => timelineDrafts.filter((draft) => approvedTimelineDraftIds.includes(draft.id)),
+    [approvedTimelineDraftIds, timelineDrafts],
+  );
   const executionProposals = useMemo(
     () => [
       ...approvedActionProposals,
@@ -233,6 +259,10 @@ export default function AICenter({
     () => executionDrafts.filter((draft) => !createdExecutionDraftIds.includes(draft.id)),
     [createdExecutionDraftIds, executionDrafts],
   );
+  const creatableTimelineDrafts = useMemo(
+    () => approvedTimelineDrafts.filter((draft) => !createdTimelineDraftIds.includes(draft.id)),
+    [approvedTimelineDrafts, createdTimelineDraftIds],
+  );
   const executionTargetEventName = data.events.find((event) => event.id === executionEventId)?.name ?? "";
   const approvalQueueItems = useMemo(
     () => buildAIApprovalQueueItems({
@@ -240,20 +270,26 @@ export default function AICenter({
       analyzedEventName: analyzedEvent?.name,
       approvedProposalIds,
       approvedSponsorDraftIds,
+      approvedTimelineDraftIds,
       createdExecutionDraftIds,
+      createdTimelineDraftIds,
       executionHistory,
       executionTargetEventName,
       sponsorActionDrafts,
+      timelineDrafts,
     }),
     [
       actionProposals,
       analyzedEvent?.name,
       approvedProposalIds,
       approvedSponsorDraftIds,
+      approvedTimelineDraftIds,
       createdExecutionDraftIds,
+      createdTimelineDraftIds,
       executionHistory,
       executionTargetEventName,
       sponsorActionDrafts,
+      timelineDrafts,
     ],
   );
 
@@ -270,6 +306,13 @@ export default function AICenter({
     setSelectedSponsorDraftIds((current) => current.filter((draftId) => activeSponsorDraftIds.has(draftId)));
     setApprovedSponsorDraftIds((current) => current.filter((draftId) => activeSponsorDraftIds.has(draftId)));
   }, [sponsorActionDrafts]);
+
+  useEffect(() => {
+    const activeTimelineDraftIds = new Set(timelineDrafts.map((draft) => draft.id));
+    setSelectedTimelineDraftIds((current) => current.filter((draftId) => activeTimelineDraftIds.has(draftId)));
+    setApprovedTimelineDraftIds((current) => current.filter((draftId) => activeTimelineDraftIds.has(draftId)));
+    setCreatedTimelineDraftIds((current) => current.filter((draftId) => activeTimelineDraftIds.has(draftId)));
+  }, [timelineDrafts]);
 
   useEffect(() => {
     if (data.events.length === 0) {
@@ -388,6 +431,29 @@ export default function AICenter({
     setShowTaskCreateConfirm(false);
   };
 
+  const openTimelineCreateConfirm = () => {
+    setTimelineCreateError("");
+    setTimelineCreateMessage("");
+
+    if (!analyzedEvent) {
+      setTimelineCreateError("Analyze an event before creating timeline items.");
+      return;
+    }
+
+    if (creatableTimelineDrafts.length === 0) {
+      setTimelineCreateError("There are no new approved timeline drafts to create.");
+      return;
+    }
+
+    setShowTimelineCreateConfirm(true);
+  };
+
+  const cancelTimelineCreate = () => {
+    if (isCreatingTimelineItems) return;
+    setTimelineCreateError("");
+    setShowTimelineCreateConfirm(false);
+  };
+
   const openUndoExecutionConfirm = (entryId: string) => {
     setTaskUndoError("");
     setTaskUndoMessage("");
@@ -403,7 +469,7 @@ export default function AICenter({
       return;
     }
 
-    if (!entry.taskIds || entry.taskIds.length === 0) {
+    if (getExecutionUndoIds(entry).length === 0) {
       setTaskUndoError("Undo unavailable for this older entry.");
       return;
     }
@@ -431,7 +497,8 @@ export default function AICenter({
       return;
     }
 
-    if (!entry.taskIds || entry.taskIds.length === 0) {
+    const undoIds = getExecutionUndoIds(entry);
+    if (undoIds.length === 0) {
       setTaskUndoError("Undo unavailable for this older entry.");
       return;
     }
@@ -441,12 +508,25 @@ export default function AICenter({
     setTaskUndoMessage("");
 
     try {
-      if (tasksData.isSupabaseMode) {
-        for (const taskId of entry.taskIds) {
+      if (getExecutionEntryType(entry) === "timeline") {
+        if (eventsData.isSupabaseMode) {
+          if (!workspaceId) throw new Error("No authenticated EventOS workspace is available.");
+          for (const timelineItemId of undoIds) {
+            await deleteWorkspaceTimelineItem(workspaceId, timelineItemId);
+          }
+        } else {
+          const timelineItemIdsToRemove = new Set(undoIds);
+          setData((current) => ({
+            ...current,
+            timeline: current.timeline.filter((item) => !timelineItemIdsToRemove.has(item.id)),
+          }));
+        }
+      } else if (tasksData.isSupabaseMode) {
+        for (const taskId of undoIds) {
           await tasksData.deleteTask(taskId);
         }
       } else {
-        const taskIdsToRemove = new Set(entry.taskIds);
+        const taskIdsToRemove = new Set(undoIds);
         setData((current) => ({
           ...current,
           tasks: current.tasks.filter((task) => !taskIdsToRemove.has(task.id)),
@@ -458,10 +538,10 @@ export default function AICenter({
           ? { ...historyEntry, status: "Undone", undoneAt: new Date().toISOString() }
           : historyEntry
       )));
-      setTaskUndoMessage(`${entry.taskIds.length} AI-created tasks undone successfully.`);
+      setTaskUndoMessage(getUndoSuccessMessage(entry, undoIds.length));
       setUndoExecutionId("");
     } catch (error) {
-      setTaskUndoError(getErrorMessage(error, "Unable to undo AI-created tasks."));
+      setTaskUndoError(getErrorMessage(error, getUndoErrorMessage(entry)));
     } finally {
       setIsUndoingTasks(false);
     }
@@ -552,6 +632,87 @@ export default function AICenter({
       setTaskCreateError(getErrorMessage(error, "Unable to create tasks from approved drafts."));
     } finally {
       setIsCreatingTasks(false);
+    }
+  };
+
+  const createApprovedTimelineItems = async () => {
+    if (isCreatingTimelineItems) return;
+
+    if (!analyzedEvent) {
+      setTimelineCreateError("Analyze an event before creating timeline items.");
+      return;
+    }
+
+    if (creatableTimelineDrafts.length === 0) {
+      setTimelineCreateError("There are no new approved timeline drafts to create.");
+      return;
+    }
+
+    setIsCreatingTimelineItems(true);
+    setTimelineCreateError("");
+    setTimelineCreateMessage("");
+
+    const successfulDraftIds: string[] = [];
+
+    try {
+      const createdTimelineItems: TimelineItem[] = [];
+
+      if (eventsData.isSupabaseMode) {
+        if (!workspaceId) throw new Error("No authenticated EventOS workspace is available.");
+        for (const draft of creatableTimelineDrafts) {
+          const createdItem = await createWorkspaceTimelineItem(workspaceId, toTimelineWriteInput(draft, analyzedEvent));
+          createdTimelineItems.push(createdItem);
+          successfulDraftIds.push(draft.id);
+        }
+      } else {
+        const idSeed = Date.now();
+        const localTimelineItems: TimelineItem[] = creatableTimelineDrafts.map((draft, index) => ({
+          ...toTimelineWriteInput(draft, analyzedEvent),
+          id: `ai-execution-timeline-${idSeed}-${index}`,
+        }));
+
+        setData((current) => ({
+          ...current,
+          timeline: [...localTimelineItems, ...current.timeline],
+        }));
+        createdTimelineItems.push(...localTimelineItems);
+        successfulDraftIds.push(...creatableTimelineDrafts.map((draft) => draft.id));
+      }
+
+      setCreatedTimelineDraftIds((current) => Array.from(new Set([
+        ...current,
+        ...successfulDraftIds,
+      ])));
+      setExecutionHistory((current) => [
+        {
+          createdAt: new Date().toISOString(),
+          entryType: "timeline",
+          id: `timeline-execution-${Date.now()}`,
+          source: "AI Center",
+          status: "Success",
+          targetEvent: analyzedEvent.name,
+          taskCount: 0,
+          taskIds: [],
+          taskTitles: [],
+          timelineDraftIds: successfulDraftIds,
+          timelineItemCount: createdTimelineItems.length,
+          timelineItemIds: createdTimelineItems.map((item) => item.id),
+          timelineItemTitles: createdTimelineItems.map((item) => item.title),
+        },
+        ...current,
+      ]);
+      setTimelineCreateMessage(`${createdTimelineItems.length} timeline items created successfully.`);
+      setShowTimelineCreateConfirm(false);
+    } catch (error) {
+      if (successfulDraftIds.length > 0) {
+        setCreatedTimelineDraftIds((current) => Array.from(new Set([
+          ...current,
+          ...successfulDraftIds,
+        ])));
+      }
+      setTimelineCreateError(getErrorMessage(error, "Unable to create timeline items from approved drafts."));
+    } finally {
+      setIsCreatingTimelineItems(false);
     }
   };
 
@@ -676,8 +837,20 @@ export default function AICenter({
       />
 
       <TimelineDraftBuilder
-        analysis={eventAnalysis}
-        analyzedEvent={analyzedEvent}
+        approvedDraftIds={approvedTimelineDraftIds}
+        drafts={timelineDrafts}
+        hasAnalysis={Boolean(eventAnalysis)}
+        onApproveSelected={() => {
+          setApprovedTimelineDraftIds((current) => Array.from(new Set([...current, ...selectedTimelineDraftIds])));
+        }}
+        onToggleDraft={(draftId) => {
+          setSelectedTimelineDraftIds((current) => (
+            current.includes(draftId)
+              ? current.filter((selectedId) => selectedId !== draftId)
+              : [...current, draftId]
+          ));
+        }}
+        selectedDraftIds={selectedTimelineDraftIds}
       />
 
       <AIActionProposals
@@ -716,14 +889,20 @@ export default function AICenter({
 
       <ExecutionPreview
         createdDraftIds={createdExecutionDraftIds}
+        createdTimelineDraftIds={createdTimelineDraftIds}
         drafts={executionDrafts}
         error={taskCreateError}
         events={data.events}
         isCreating={isCreatingTasks}
+        isCreatingTimelineItems={isCreatingTimelineItems}
         message={taskCreateMessage}
         onChangeEvent={setExecutionEventId}
         onCreateTasks={openTaskCreateConfirm}
+        onCreateTimelineItems={openTimelineCreateConfirm}
         selectedEventId={executionEventId}
+        timelineDrafts={approvedTimelineDrafts}
+        timelineError={timelineCreateError}
+        timelineMessage={timelineCreateMessage}
       />
 
       <ExecutionHistory
@@ -895,6 +1074,16 @@ export default function AICenter({
           isCreating={isCreatingTasks}
           onCancel={cancelTaskCreate}
           onConfirm={() => void createApprovedTasks()}
+        />
+      )}
+
+      {showTimelineCreateConfirm && (
+        <ConfirmCreateTimelineItemsModal
+          draftCount={creatableTimelineDrafts.length}
+          eventName={analyzedEvent?.name ?? "selected event"}
+          isCreating={isCreatingTimelineItems}
+          onCancel={cancelTimelineCreate}
+          onConfirm={() => void createApprovedTimelineItems()}
         />
       )}
 
@@ -1172,75 +1361,110 @@ function EventReadinessActionPlan({
   );
 }
 function TimelineDraftBuilder({
-  analysis,
-  analyzedEvent,
+  approvedDraftIds,
+  drafts,
+  hasAnalysis,
+  onApproveSelected,
+  onToggleDraft,
+  selectedDraftIds,
 }: {
-  analysis: ReturnType<typeof getCopilotInsights> | null;
-  analyzedEvent?: EventItem;
+  approvedDraftIds: string[];
+  drafts: TimelineDraft[];
+  hasAnalysis: boolean;
+  onApproveSelected: () => void;
+  onToggleDraft: (draftId: string) => void;
+  selectedDraftIds: string[];
 }) {
-  const targetEvent = analyzedEvent?.name ?? "Selected event";
-  const timelineDrafts = analysis ? buildTimelineDrafts(analysis, targetEvent) : [];
-
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Timeline Draft Builder</p>
           <h2 className="mt-1 text-xl font-semibold text-white">Readiness timeline drafts</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
-            Read-only timeline drafts generated from the selected event's readiness plan, risks, and Copilot signals.
+            Select timeline recommendations, approve them, then review them in Execution Preview before creating timeline items.
           </p>
         </div>
-        <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
-          Draft Only
-        </span>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+          <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
+            {formatNumber(selectedDraftIds.length)} selected
+          </span>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-app-primary px-3 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={selectedDraftIds.length === 0}
+            onClick={onApproveSelected}
+            type="button"
+          >
+            <CalendarCheck2 size={16} />
+            Approve Timeline Drafts
+          </button>
+        </div>
       </div>
 
-      {!analysis || !analyzedEvent ? (
+      {!hasAnalysis ? (
         <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
           Run analysis for an event to generate read-only timeline drafts.
         </div>
+      ) : drafts.length === 0 ? (
+        <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+          No timeline drafts are needed for this event yet.
+        </div>
       ) : (
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {timelineDrafts.map((draft) => (
-            <article key={draft.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
-                  {draft.priority} priority
-                </span>
-                <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
-                  Source: AI Center
-                </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200">
-                  Status: Draft Only
-                </span>
-              </div>
-              <dl className="mt-4 space-y-3">
-                <div>
-                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Timeline Item Title</dt>
-                  <dd className="mt-1 break-words text-base font-semibold text-white">{draft.title}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Date / Phase</dt>
-                  <dd className="mt-1 break-words text-sm font-medium text-white">{draft.phase}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Description</dt>
-                  <dd className="mt-1 break-words text-sm leading-6 text-slate-200">{draft.description}</dd>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+          {drafts.map((draft) => {
+            const isApproved = approvedDraftIds.includes(draft.id);
+            const isSelected = selectedDraftIds.includes(draft.id);
+
+            return (
+              <article key={draft.id} className={`rounded-lg border p-4 transition ${isSelected ? "border-app-primary/50 bg-app-primary/10" : "border-white/10 bg-white/[0.035]"}`}>
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    checked={isSelected}
+                    className="mt-1 h-4 w-4 rounded border-app-primary/50 bg-slate-950 text-app-primary focus:ring-app-primary/45"
+                    onChange={() => onToggleDraft(draft.id)}
+                    type="checkbox"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
+                        {draft.priority} priority
+                      </span>
+                      <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                        Source: AI Center
+                      </span>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${isApproved ? "border-app-success/30 bg-app-success/12 text-green-100" : "border-white/10 bg-white/[0.04] text-slate-200"}`}>
+                        Status: {isApproved ? "Approved" : "Draft Only"}
+                      </span>
+                    </span>
+                  </span>
+                </label>
+                <dl className="mt-4 space-y-3">
                   <div>
-                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Source Signal</dt>
-                    <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceSignal}</dd>
+                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Timeline Item Title</dt>
+                    <dd className="mt-1 break-words text-base font-semibold text-white">{draft.title}</dd>
                   </div>
                   <div>
-                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Target Event</dt>
-                    <dd className="mt-1 break-words text-sm font-medium text-white">{draft.targetEvent}</dd>
+                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Date / Phase</dt>
+                    <dd className="mt-1 break-words text-sm font-medium text-white">{draft.phase}</dd>
                   </div>
-                </div>
-              </dl>
-            </article>
-          ))}
+                  <div>
+                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Description</dt>
+                    <dd className="mt-1 break-words text-sm leading-6 text-slate-200">{draft.description}</dd>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Source Signal</dt>
+                      <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceSignal}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Target Event</dt>
+                      <dd className="mt-1 break-words text-sm font-medium text-white">{draft.targetEvent}</dd>
+                    </div>
+                  </div>
+                </dl>
+              </article>
+            );
+          })}
         </div>
       )}
     </section>
@@ -1614,35 +1838,48 @@ function ApprovalQueueCount({ label, value }: { label: AIApprovalQueueStatus; va
 
 function ExecutionPreview({
   createdDraftIds,
+  createdTimelineDraftIds,
   drafts,
   error,
   events,
   isCreating,
+  isCreatingTimelineItems,
   message,
   onChangeEvent,
   onCreateTasks,
+  onCreateTimelineItems,
   selectedEventId,
+  timelineDrafts,
+  timelineError,
+  timelineMessage,
 }: {
   createdDraftIds: string[];
+  createdTimelineDraftIds: string[];
   drafts: AITaskDraft[];
   error: string;
   events: EventItem[];
   isCreating: boolean;
+  isCreatingTimelineItems: boolean;
   message: string;
   onChangeEvent: (eventId: string) => void;
   onCreateTasks: () => void;
+  onCreateTimelineItems: () => void;
   selectedEventId: string;
+  timelineDrafts: TimelineExecutionDraft[];
+  timelineError: string;
+  timelineMessage: string;
 }) {
   const pendingDrafts = drafts.filter((draft) => !createdDraftIds.includes(draft.id));
+  const pendingTimelineDrafts = timelineDrafts.filter((draft) => !createdTimelineDraftIds.includes(draft.id));
 
   return (
     <section className="glass-panel rounded-lg p-4 sm:p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Execution Preview</p>
-          <h2 className="mt-1 text-xl font-semibold text-white">Task drafts from approved proposals</h2>
+          <h2 className="mt-1 text-xl font-semibold text-white">Approved AI execution drafts</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
-            Draft-only execution preview. These items are generated only from approved AI Action Proposals and Sponsor Action Drafts.
+            Review approved task and timeline drafts before creating real EventOS records. Timeline drafts create timeline items only.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
@@ -1688,42 +1925,42 @@ function ExecutionPreview({
                 const isCreated = createdDraftIds.includes(draft.id);
                 return (
                   <>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
-                  {draft.priority} priority
-                </span>
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${isCreated ? "border-app-success/30 bg-app-success/12 text-green-100" : "border-white/10 bg-white/[0.04] text-slate-300"}`}>
-                  {isCreated ? "Created" : "Draft Only"}
-                </span>
-              </div>
-              <dl className="mt-4 space-y-3">
-                <div>
-                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Draft Title</dt>
-                  <dd className="mt-1 break-words text-base font-semibold text-white">{draft.title}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Draft Description</dt>
-                  <dd className="mt-1 break-words text-sm leading-6 text-slate-200">{draft.description}</dd>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Priority</dt>
-                    <dd className="mt-1 text-sm font-medium text-white">{draft.priority}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Due Date</dt>
-                    <dd className="mt-1 text-sm font-medium text-white">{draft.dueDate}</dd>
-                  </div>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Source Proposal</dt>
-                  <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceProposal}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Target Event</dt>
-                  <dd className="mt-1 break-words text-sm font-medium text-white">{draft.targetEvent}</dd>
-                </div>
-              </dl>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
+                        {draft.priority} priority
+                      </span>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${isCreated ? "border-app-success/30 bg-app-success/12 text-green-100" : "border-white/10 bg-white/[0.04] text-slate-300"}`}>
+                        {isCreated ? "Created" : "Draft Only"}
+                      </span>
+                    </div>
+                    <dl className="mt-4 space-y-3">
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Draft Title</dt>
+                        <dd className="mt-1 break-words text-base font-semibold text-white">{draft.title}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Draft Description</dt>
+                        <dd className="mt-1 break-words text-sm leading-6 text-slate-200">{draft.description}</dd>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Priority</dt>
+                          <dd className="mt-1 text-sm font-medium text-white">{draft.priority}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Due Date</dt>
+                          <dd className="mt-1 text-sm font-medium text-white">{draft.dueDate}</dd>
+                        </div>
+                      </div>
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Source Proposal</dt>
+                        <dd className="mt-1 break-words text-sm font-medium text-white">{draft.sourceProposal}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Target Event</dt>
+                        <dd className="mt-1 break-words text-sm font-medium text-white">{draft.targetEvent}</dd>
+                      </div>
+                    </dl>
                   </>
                 );
               })()}
@@ -1731,10 +1968,88 @@ function ExecutionPreview({
           ))}
         </div>
       )}
+
+      <div className="mt-6 border-t border-white/10 pt-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Timeline item drafts</p>
+            <h3 className="mt-1 text-lg font-semibold text-white">Timeline drafts from approved timeline proposals</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
+              These drafts create timeline items only for the analyzed event.
+            </p>
+          </div>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-app-primary px-3 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={pendingTimelineDrafts.length === 0 || isCreatingTimelineItems}
+            onClick={onCreateTimelineItems}
+            type="button"
+          >
+            <CalendarCheck2 size={16} />
+            {isCreatingTimelineItems ? "Creating..." : "Create Timeline Items"}
+          </button>
+        </div>
+
+        {(timelineMessage || timelineError) && (
+          <p className={`mt-5 rounded-lg border px-3 py-2 text-sm ${timelineMessage ? "border-app-success/30 bg-app-success/10 text-green-100" : "border-app-danger/30 bg-app-danger/10 text-red-100"}`}>
+            {timelineMessage || timelineError}
+          </p>
+        )}
+
+        {timelineDrafts.length === 0 ? (
+          <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
+            Approve timeline drafts to preview timeline item creation here.
+          </div>
+        ) : (
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {timelineDrafts.map((draft) => {
+              const isCreated = createdTimelineDraftIds.includes(draft.id);
+
+              return (
+                <article key={`timeline-preview-${draft.id}`} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getProposalImpactClass(draft.priority)}`}>
+                      {draft.priority} priority
+                    </span>
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${isCreated ? "border-app-success/30 bg-app-success/12 text-green-100" : "border-white/10 bg-white/[0.04] text-slate-300"}`}>
+                      Status: {isCreated ? "Created" : "Draft Only"}
+                    </span>
+                    <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                      Source: AI Center
+                    </span>
+                  </div>
+                  <dl className="mt-4 space-y-3">
+                    <div>
+                      <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Timeline Item Title</dt>
+                      <dd className="mt-1 break-words text-base font-semibold text-white">{draft.title}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Suggested Date / Phase</dt>
+                      <dd className="mt-1 break-words text-sm font-medium text-white">{draft.phase}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Description</dt>
+                      <dd className="mt-1 break-words text-sm leading-6 text-slate-200">{draft.description}</dd>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Priority</dt>
+                        <dd className="mt-1 text-sm font-medium text-white">{draft.priority}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.12em] text-app-muted">Target Event</dt>
+                        <dd className="mt-1 break-words text-sm font-medium text-white">{draft.targetEvent}</dd>
+                      </div>
+                    </div>
+                  </dl>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
-
 function ExecutionHistory({
   error,
   history,
@@ -1753,9 +2068,9 @@ function ExecutionHistory({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Execution History</p>
-          <h2 className="mt-1 text-xl font-semibold text-white">AI task execution audit trail</h2>
+          <h2 className="mt-1 text-xl font-semibold text-white">AI execution audit trail</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
-            Local session history for tasks created from approved AI drafts. No separate audit table is created.
+            Local session history for tasks and timeline items created from approved AI drafts. No separate audit table is created.
           </p>
         </div>
         <span className="inline-flex w-fit rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-200">
@@ -1771,64 +2086,73 @@ function ExecutionHistory({
 
       {history.length === 0 ? (
         <div className="mt-5 rounded-lg border border-white/10 bg-slate-950/25 px-4 py-5 text-sm leading-6 text-app-muted">
-          No task execution history yet. Create tasks from approved drafts to see audit entries here.
+          No execution history yet. Create tasks or timeline items from approved drafts to see audit entries here.
         </div>
       ) : (
         <div className="mt-5 space-y-3">
           {history.map((entry) => (
             <article key={entry.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
               {(() => {
-                const canUndo = entry.status === "Success" && Boolean(entry.taskIds?.length);
-                const isOlderEntry = entry.status === "Success" && !entry.taskIds?.length;
+                const entryType = getExecutionEntryType(entry);
+                const undoIds = getExecutionUndoIds(entry);
+                const canUndo = entry.status === "Success" && undoIds.length > 0;
+                const isOlderEntry = entry.status === "Success" && undoIds.length === 0;
                 const isUndoing = undoingEntryId === entry.id;
+                const itemCount = getExecutionItemCount(entry);
+                const itemLabel = entryType === "timeline" ? "timeline items" : "tasks";
+                const titles = getExecutionHistoryTitles(entry);
+
                 return (
                   <>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${entry.status === "Undone" ? "border-app-warning/30 bg-app-warning/12 text-amber-100" : "border-app-success/30 bg-app-success/12 text-green-100"}`}>
-                      Status: {entry.status}
-                    </span>
-                    <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
-                      Source: {entry.source}
-                    </span>
-                  </div>
-                  <h3 className="mt-3 break-words text-base font-semibold text-white">{entry.targetEvent}</h3>
-                  <p className="mt-1 text-sm text-app-muted">{formatNumber(entry.taskCount)} tasks created</p>
-                </div>
-                <div className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2 text-sm text-slate-200">
-                  {formatExecutionHistoryTime(entry.createdAt)} session
-                </div>
-              </div>
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                {isOlderEntry ? (
-                  <p className="text-sm text-app-muted">Undo unavailable for this older entry.</p>
-                ) : entry.status === "Undone" ? (
-                  <p className="text-sm text-app-muted">This AI execution has already been undone.</p>
-                ) : (
-                  <p className="text-sm text-app-muted">Undo removes only the tasks created by this execution.</p>
-                )}
-                <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 text-sm font-medium text-red-100 transition hover:bg-app-danger/15 focus:outline-none focus:ring-2 focus:ring-app-danger/35 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={!canUndo || isUndoing}
-                  onClick={() => onUndo(entry.id)}
-                  type="button"
-                >
-                  <Trash2 size={16} />
-                  {isUndoing ? "Undoing..." : canUndo ? "Undo Tasks" : "Undo unavailable"}
-                </button>
-              </div>
-              <div className="mt-4">
-                <p className="text-xs uppercase tracking-[0.12em] text-app-muted">Task titles created</p>
-                <ul className="mt-2 space-y-2">
-                  {entry.taskTitles.map((title) => (
-                    <li key={title} className="flex gap-2 text-sm leading-6 text-slate-200">
-                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-success" />
-                      <span className="min-w-0 break-words">{title}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${entry.status === "Undone" ? "border-app-warning/30 bg-app-warning/12 text-amber-100" : "border-app-success/30 bg-app-success/12 text-green-100"}`}>
+                            Status: {entry.status}
+                          </span>
+                          <span className="rounded-full border border-app-primary/25 bg-app-primary/10 px-2.5 py-1 text-xs font-medium text-blue-100">
+                            Source: {entry.source}
+                          </span>
+                          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200">
+                            {entryType === "timeline" ? "Timeline execution" : "Task execution"}
+                          </span>
+                        </div>
+                        <h3 className="mt-3 break-words text-base font-semibold text-white">{entry.targetEvent}</h3>
+                        <p className="mt-1 text-sm text-app-muted">{formatNumber(itemCount)} {itemLabel} created</p>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2 text-sm text-slate-200">
+                        {formatExecutionHistoryTime(entry.createdAt)} session
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      {isOlderEntry ? (
+                        <p className="text-sm text-app-muted">Undo unavailable for this older entry.</p>
+                      ) : entry.status === "Undone" ? (
+                        <p className="text-sm text-app-muted">This AI execution has already been undone.</p>
+                      ) : (
+                        <p className="text-sm text-app-muted">Undo removes only the {itemLabel} created by this execution.</p>
+                      )}
+                      <button
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-app-danger/30 bg-app-danger/10 px-3 text-sm font-medium text-red-100 transition hover:bg-app-danger/15 focus:outline-none focus:ring-2 focus:ring-app-danger/35 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={!canUndo || isUndoing}
+                        onClick={() => onUndo(entry.id)}
+                        type="button"
+                      >
+                        <Trash2 size={16} />
+                        {isUndoing ? "Undoing..." : canUndo ? entryType === "timeline" ? "Undo Timeline Items" : "Undo Tasks" : "Undo unavailable"}
+                      </button>
+                    </div>
+                    <div className="mt-4">
+                      <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{entryType === "timeline" ? "Timeline item titles created" : "Task titles created"}</p>
+                      <ul className="mt-2 space-y-2">
+                        {titles.map((title) => (
+                          <li key={title} className="flex gap-2 text-sm leading-6 text-slate-200">
+                            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-app-success" />
+                            <span className="min-w-0 break-words">{title}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   </>
                 );
               })()}
@@ -2273,19 +2597,25 @@ function buildAIApprovalQueueItems({
   analyzedEventName,
   approvedProposalIds,
   approvedSponsorDraftIds,
+  approvedTimelineDraftIds,
   createdExecutionDraftIds,
+  createdTimelineDraftIds,
   executionHistory,
   executionTargetEventName,
   sponsorActionDrafts,
+  timelineDrafts,
 }: {
   actionProposals: AIActionProposal[];
   analyzedEventName?: string;
   approvedProposalIds: string[];
   approvedSponsorDraftIds: string[];
+  approvedTimelineDraftIds: string[];
   createdExecutionDraftIds: string[];
+  createdTimelineDraftIds: string[];
   executionHistory: AIExecutionHistoryEntry[];
   executionTargetEventName: string;
   sponsorActionDrafts: SponsorActionDraft[];
+  timelineDrafts: TimelineDraft[];
 }): AIApprovalQueueItem[] {
   const proposalItems = actionProposals.map((proposal) => {
     const isExecuted = createdExecutionDraftIds.includes(proposal.id);
@@ -2319,18 +2649,42 @@ function buildAIApprovalQueueItems({
     } satisfies AIApprovalQueueItem;
   });
 
-  const historyItems = executionHistory.map((entry) => ({
-    id: `history-${entry.id}`,
-    impact: entry.status === "Undone" ? "Low" : "Medium",
-    source: entry.source,
-    status: entry.status === "Undone" ? "Undone" : "Executed",
-    targetEvent: entry.targetEvent,
-    title: `${formatNumber(entry.taskCount)} AI-created tasks`,
-  }) satisfies AIApprovalQueueItem);
+  const timelineItems = timelineDrafts.map((draft) => {
+    const undoneHistory = executionHistory.find((entry) => (
+      getExecutionEntryType(entry) === "timeline"
+      && entry.status === "Undone"
+      && Boolean(entry.timelineDraftIds?.includes(draft.id))
+    ));
+    const isExecuted = createdTimelineDraftIds.includes(draft.id);
+    const isApproved = approvedTimelineDraftIds.includes(draft.id);
 
-  return [...proposalItems, ...sponsorItems, ...historyItems];
+    return {
+      id: `timeline-${draft.id}`,
+      impact: draft.priority,
+      source: "AI Center",
+      status: undoneHistory ? "Undone" : isExecuted ? "Executed" : isApproved ? "Approved" : "Proposed",
+      targetEvent: draft.targetEvent,
+      title: draft.title,
+    } satisfies AIApprovalQueueItem;
+  });
+
+  const historyItems = executionHistory.map((entry) => {
+    const entryType = getExecutionEntryType(entry);
+    const itemCount = entryType === "timeline" ? entry.timelineItemCount ?? entry.timelineItemIds?.length ?? 0 : entry.taskCount;
+    const itemLabel = entryType === "timeline" ? "timeline items" : "tasks";
+
+    return {
+      id: `history-${entry.id}`,
+      impact: entry.status === "Undone" ? "Low" : "Medium",
+      source: entry.source,
+      status: entry.status === "Undone" ? "Undone" : "Executed",
+      targetEvent: entry.targetEvent,
+      title: `${formatNumber(itemCount)} AI-created ${itemLabel}`,
+    } satisfies AIApprovalQueueItem;
+  });
+
+  return [...proposalItems, ...sponsorItems, ...timelineItems, ...historyItems];
 }
-
 function getApprovalQueueCounts(items: AIApprovalQueueItem[]) {
   return items.reduce<Record<AIApprovalQueueStatus, number>>((counts, item) => ({
     ...counts,
@@ -2386,6 +2740,56 @@ function getSuggestedDraftDueDate(impact: AIActionProposal["impact"]) {
   return dueDate.toISOString().slice(0, 10);
 }
 
+function toTimelineWriteInput(draft: TimelineExecutionDraft, event: EventItem) {
+  return {
+    date: getTimelineExecutionDate(draft, event),
+    description: `${draft.description}\n\nSource signal: ${draft.sourceSignal}\nPriority: ${draft.priority}\nSource: AI Center`,
+    eventId: event.id,
+    status: "Upcoming" as const,
+    title: draft.title,
+  };
+}
+
+function getTimelineExecutionDate(draft: TimelineExecutionDraft, event: EventItem) {
+  const now = new Date();
+  const offsetDays = draft.priority === "High" ? 3 : draft.priority === "Medium" ? 7 : 14;
+  const suggestedDate = new Date(now);
+  suggestedDate.setDate(now.getDate() + offsetDays);
+
+  const eventDate = new Date(event.date);
+  const finalDate = Number.isNaN(eventDate.getTime()) || suggestedDate <= eventDate ? suggestedDate : eventDate;
+  return finalDate.toISOString().slice(0, 10);
+}
+
+function getExecutionEntryType(entry: AIExecutionHistoryEntry) {
+  return entry.entryType === "timeline" ? "timeline" : "tasks";
+}
+
+function getExecutionUndoIds(entry: AIExecutionHistoryEntry) {
+  return getExecutionEntryType(entry) === "timeline" ? entry.timelineItemIds ?? [] : entry.taskIds ?? [];
+}
+
+function getExecutionItemCount(entry: AIExecutionHistoryEntry) {
+  return getExecutionEntryType(entry) === "timeline"
+    ? entry.timelineItemCount ?? entry.timelineItemIds?.length ?? 0
+    : entry.taskCount;
+}
+
+function getExecutionHistoryTitles(entry: AIExecutionHistoryEntry) {
+  return getExecutionEntryType(entry) === "timeline" ? entry.timelineItemTitles ?? [] : entry.taskTitles;
+}
+
+function getUndoSuccessMessage(entry: AIExecutionHistoryEntry, count: number) {
+  return getExecutionEntryType(entry) === "timeline"
+    ? `${count} AI-created timeline items undone successfully.`
+    : `${count} AI-created tasks undone successfully.`;
+}
+
+function getUndoErrorMessage(entry: AIExecutionHistoryEntry) {
+  return getExecutionEntryType(entry) === "timeline"
+    ? "Unable to undo AI-created timeline items."
+    : "Unable to undo AI-created tasks.";
+}
 function formatExecutionHistoryTime(createdAt: string) {
   return new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium",
@@ -2432,7 +2836,12 @@ function isExecutionHistoryEntry(value: unknown): value is AIExecutionHistoryEnt
     && typeof entry.taskCount === "number"
     && Array.isArray(entry.taskTitles)
     && entry.taskTitles.every((title) => typeof title === "string")
+    && (!entry.entryType || entry.entryType === "tasks" || entry.entryType === "timeline")
     && (!entry.taskIds || entry.taskIds.every((taskId) => typeof taskId === "string"))
+    && (!entry.timelineDraftIds || entry.timelineDraftIds.every((draftId) => typeof draftId === "string"))
+    && (!entry.timelineItemCount || typeof entry.timelineItemCount === "number")
+    && (!entry.timelineItemIds || entry.timelineItemIds.every((itemId) => typeof itemId === "string"))
+    && (!entry.timelineItemTitles || entry.timelineItemTitles.every((title) => typeof title === "string"))
     && (!entry.undoneAt || typeof entry.undoneAt === "string")
   );
 }
@@ -2854,6 +3263,62 @@ function ConfirmCreateTasksModal({
   );
 }
 
+function ConfirmCreateTimelineItemsModal({
+  draftCount,
+  eventName,
+  isCreating,
+  onCancel,
+  onConfirm,
+}: {
+  draftCount: number;
+  eventName: string;
+  isCreating: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-xl border border-white/10 bg-slate-900 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Confirm timeline creation</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">You are about to create {formatNumber(draftCount)} timeline items.</h2>
+            <p className="mt-2 text-sm leading-6 text-app-muted">
+              These timeline items will be added to {eventName}. No tasks, sponsors, vendors, artists, finance records, or event fields will be changed.
+            </p>
+          </div>
+          <button
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/[0.08]"
+            disabled={isCreating}
+            onClick={onCancel}
+            type="button"
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex h-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-100 transition hover:border-white/20 hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isCreating}
+            onClick={onCancel}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-medium text-white shadow-glow transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-app-primary/45 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isCreating}
+            onClick={onConfirm}
+            type="button"
+          >
+            <CalendarCheck2 size={17} />
+            {isCreating ? "Creating..." : "Create Timeline Items"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function ConfirmUndoTasksModal({
   entry,
   isUndoing,
@@ -2867,7 +3332,9 @@ function ConfirmUndoTasksModal({
 }) {
   if (!entry) return null;
 
-  const taskCount = entry.taskIds?.length ?? entry.taskCount;
+  const entryType = getExecutionEntryType(entry);
+  const undoCount = getExecutionUndoIds(entry).length || getExecutionItemCount(entry);
+  const itemLabel = entryType === "timeline" ? "timeline items" : "tasks";
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm">
@@ -2876,10 +3343,10 @@ function ConfirmUndoTasksModal({
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-danger">Confirm undo</p>
             <h2 className="mt-1 text-xl font-semibold text-white">
-              You are about to undo this AI execution and remove {formatNumber(taskCount)} created tasks.
+              You are about to undo this AI execution and remove {formatNumber(undoCount)} created {itemLabel}.
             </h2>
             <p className="mt-2 text-sm leading-6 text-app-muted">
-              EventOS will remove only the tasks recorded in this AI execution history entry for {entry.targetEvent}.
+              EventOS will remove only the {itemLabel} recorded in this AI execution history entry for {entry.targetEvent}.
             </p>
           </div>
           <button
@@ -2907,7 +3374,7 @@ function ConfirmUndoTasksModal({
             type="button"
           >
             <Trash2 size={17} />
-            {isUndoing ? "Undoing..." : "Undo Tasks"}
+            {isUndoing ? "Undoing..." : entryType === "timeline" ? "Undo Timeline Items" : "Undo Tasks"}
           </button>
         </div>
       </div>
