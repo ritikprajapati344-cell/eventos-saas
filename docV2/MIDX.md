@@ -26,3 +26,5 @@
 | D22 | `22-ui-experience-blueprint.md` | Defines the desired AI-first experience, command center, blueprint view, approval center, execution center, event intelligence, and mobile direction. | Ready for review |
 | D23 | `23-architecture-freeze.md` | Freezes final V2 architecture, MVP agents, core flow, hidden-engine model, security expectations, and scope boundaries. | Architecture freeze candidate |
 | D24 | `24-sprint-1-ai-command-center-foundation.md` | Defines Sprint 1 scope, deliverables, files expected, files to avoid, acceptance tests, and success criteria. | Sprint 1 candidate |
+| D25 | `25-blueprint-json-contract-v1.md` | Defines official AI blueprint JSON input/output contract. | Sprint 2 prerequisite |
+| D26 | `26-planner-agent-contract-v1.md` | Defines Planner Agent behavior, prompt contract, thinking order, and JSON-only output rules. | Sprint 2 prerequisite |

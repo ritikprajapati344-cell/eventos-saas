@@ -110,6 +110,10 @@ The MVP excludes:
 22. `22-ui-experience-blueprint.md`
 23. `23-architecture-freeze.md`
 24. `24-sprint-1-ai-command-center-foundation.md`
+25. `25-blueprint-json-contract-v1.md`
+26. `26-planner-agent-contract-v1.md`
+
+Documents 25 and 26 define the AI-to-UI contract required before Sprint 2 Gemini Planning Engine work.
 
 ## Current Status
 
