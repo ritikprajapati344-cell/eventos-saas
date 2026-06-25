@@ -18,11 +18,14 @@ import { useTimelineData } from "./hooks/useTimelineData";
 import { useVendorsData } from "./hooks/useVendorsData";
 import AICenter from "./pages/AICenter";
 import Artists from "./pages/Artists";
+import Approvals from "./pages/Approvals";
 import Dashboard from "./pages/Dashboard";
 import EventDetail from "./pages/EventDetail";
+import EventOSAI from "./pages/EventOSAI";
 import Events from "./pages/Events";
 import Expenses from "./pages/Expenses";
 import Finance from "./pages/Finance";
+import History from "./pages/History";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
@@ -105,6 +108,10 @@ function AuthenticatedApp() {
       <Routes>
         <Route
           path="/"
+          element={<EventOSAI data={data} />}
+        />
+        <Route
+          path="/dashboard"
           element={(
             <Dashboard
               data={data}
@@ -117,6 +124,8 @@ function AuthenticatedApp() {
             />
           )}
         />
+        <Route path="/approvals" element={<Approvals />} />
+        <Route path="/history" element={<History />} />
         <Route
           path="/ai-center"
           element={(

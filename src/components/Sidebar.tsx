@@ -3,7 +3,10 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CircleDollarSign,
+  ClipboardCheck,
   Gauge,
+  History as HistoryIcon,
+  Home,
   LayoutDashboard,
   LogOut,
   Mic2,
@@ -14,15 +17,23 @@ import {
   Ticket,
   Tickets,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import type { EventItem, EventOSData } from "../types";
 
 const navigation = [
-  { label: "Dashboard", path: "/", icon: LayoutDashboard },
-  { label: "AI Center ✨", path: "/ai-center", icon: Sparkles },
-  { label: "Events", path: "/events", icon: CalendarDays },
+  { label: "EventOS AI", path: "/", icon: Sparkles },
+  { label: "AI Command Center", path: "/ai-center", icon: Home },
+  { label: "My Events", path: "/events", icon: CalendarDays },
+  { label: "Approvals", path: "/approvals", icon: ClipboardCheck },
+  { label: "History", path: "/history", icon: HistoryIcon },
+  { label: "Settings", path: "/settings", icon: Settings },
+];
+
+const engineNavigation = [
+  { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Sponsors", path: "/sponsors", icon: BriefcaseBusiness },
   { label: "Artists", path: "/artists", icon: Mic2 },
   { label: "Vendors", path: "/vendors", icon: ShieldCheck },
@@ -30,7 +41,6 @@ const navigation = [
   { label: "Finance", path: "/finance", icon: ReceiptIndianRupee },
   { label: "Expenses", path: "/expenses", icon: CircleDollarSign },
   { label: "Reports", path: "/reports", icon: BarChart3 },
-  { label: "Settings", path: "/settings", icon: Settings },
 ];
 
 interface SidebarProps {
@@ -66,28 +76,17 @@ export function Sidebar({ data, onNavigate }: SidebarProps) {
         </div>
       </div>
 
-      <nav className="space-y-1">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                [
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition duration-200",
-                  isActive
-                    ? "bg-app-primary text-white shadow-glow"
-                    : "text-slate-300 hover:bg-white/[0.06] hover:text-white",
-                ].join(" ")
-              }
-            >
-              <Icon size={19} />
-              <span>{item.label}</span>
-            </NavLink>
-          );
-        })}
+      <nav className="space-y-5">
+        <div className="space-y-1">
+          {navigation.map((item) => <SidebarLink item={item} key={item.path} onNavigate={onNavigate} />)}
+        </div>
+
+        <div>
+          <p className="mb-2 px-3 text-[11px] font-medium uppercase tracking-[0.14em] text-app-muted">V1 data engines</p>
+          <div className="space-y-1">
+            {engineNavigation.map((item) => <SidebarLink item={item} key={item.path} onNavigate={onNavigate} />)}
+          </div>
+        </div>
       </nav>
 
       <EventHealthCard health={eventHealth} />
@@ -107,6 +106,34 @@ export function Sidebar({ data, onNavigate }: SidebarProps) {
         </button>
       </div>
     </aside>
+  );
+}
+
+function SidebarLink({
+  item,
+  onNavigate,
+}: {
+  item: { icon: LucideIcon; label: string; path: string };
+  onNavigate?: () => void;
+}) {
+  const Icon = item.icon;
+
+  return (
+    <NavLink
+      className={({ isActive }) =>
+        [
+          "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition duration-200",
+          isActive
+            ? "bg-app-primary text-white shadow-glow"
+            : "text-slate-300 hover:bg-white/[0.06] hover:text-white",
+        ].join(" ")
+      }
+      onClick={onNavigate}
+      to={item.path}
+    >
+      <Icon size={19} />
+      <span>{item.label}</span>
+    </NavLink>
   );
 }
 
