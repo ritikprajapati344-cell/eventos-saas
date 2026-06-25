@@ -84,6 +84,40 @@ const initialClarificationAnswers = {
 
 type ClarificationAnswers = typeof initialClarificationAnswers;
 
+function getCommandPrefill(commandText: string): Partial<ClarificationAnswers> {
+  const normalized = commandText.toLowerCase();
+  const prefill: Partial<ClarificationAnswers> = {};
+
+  if (normalized.includes("sunil grover")) {
+    prefill.eventName = "Sunil Grover Comedy Show";
+  }
+
+  if (normalized.includes("comedy")) {
+    prefill.eventType = "Comedy Show";
+  } else if (normalized.includes("concert")) {
+    prefill.eventType = "Concert";
+  } else if (normalized.includes("wedding")) {
+    prefill.eventType = "Wedding";
+  } else if (normalized.includes("corporate")) {
+    prefill.eventType = "Corporate Event";
+  }
+
+  if (normalized.includes("ahmedabad")) {
+    prefill.city = "Ahmedabad";
+  } else if (normalized.includes("gandhidham")) {
+    prefill.city = "Gandhidham";
+  }
+
+  return prefill;
+}
+
+function buildPrefilledAnswers(commandText: string): ClarificationAnswers {
+  return {
+    ...initialClarificationAnswers,
+    ...getCommandPrefill(commandText),
+  };
+}
+
 export default function EventOSAI({ data }: EventOSAIProps) {
   const activeEvents = data.events.filter((event) => !event.archived);
   const expectedRevenue = activeEvents.reduce((sum, event) => sum + event.expectedRevenue, 0);
@@ -103,6 +137,7 @@ export default function EventOSAI({ data }: EventOSAIProps) {
     }
 
     setValidationMessage("");
+    setAnswers(buildPrefilledAnswers(command));
     setCurrentStep(0);
     setIsClarifying(true);
   };
@@ -146,7 +181,7 @@ export default function EventOSAI({ data }: EventOSAIProps) {
     }
 
     setValidationMessage("");
-    setBlueprintMessage("Blueprint generation is not connected in Sprint 1.2. Clarification answers are ready for the next approved sprint.");
+    setBlueprintMessage("Your answers are ready. Blueprint generation will be activated in the next approved sprint.");
   };
 
   return (
@@ -446,9 +481,9 @@ function AudienceBudgetStep({
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <ClarificationField label="Capacity" onChange={(value) => onUpdate("capacity", value)} placeholder="1500" required type="number" value={answers.capacity} />
-      <ClarificationField label="Budget" onChange={(value) => onUpdate("budget", value)} placeholder="Rs. 20L" required value={answers.budget} />
-      <ClarificationField label="Revenue Target" onChange={(value) => onUpdate("revenueTarget", value)} placeholder="Rs. 50L" required value={answers.revenueTarget} />
+      <ClarificationField inputMode="numeric" label="Capacity" onChange={(value) => onUpdate("capacity", value)} placeholder="1500" required value={answers.capacity} formatValue={formatCapacityAnswer} />
+      <ClarificationField inputMode="numeric" label="Budget" onChange={(value) => onUpdate("budget", value)} placeholder="2000000" required value={answers.budget} formatValue={formatMoneyAnswer} />
+      <ClarificationField inputMode="numeric" label="Revenue Target" onChange={(value) => onUpdate("revenueTarget", value)} placeholder="5000000" required value={answers.revenueTarget} formatValue={formatMoneyAnswer} />
       <ClarificationField label="Target Audience" onChange={(value) => onUpdate("targetAudience", value)} placeholder="Families, corporate leaders, college students..." required value={answers.targetAudience} />
     </div>
   );
@@ -481,39 +516,103 @@ function BusinessGoalsStep({
 }
 
 function ReviewStep({ answers }: { answers: ClarificationAnswers }) {
-  const rows = [
-    ["Event Name", answers.eventName],
-    ["Event Type", answers.eventType],
-    ["City", answers.city],
-    ["Event Date", answers.eventDate],
-    ["Capacity", answers.capacity],
-    ["Budget", answers.budget],
-    ["Revenue Target", answers.revenueTarget],
-    ["Target Audience", answers.targetAudience],
-    ["Sponsor Priority", answers.sponsorPriority],
-    ["Ticket Sales Goal", answers.ticketSalesGoal],
-    ["Profit Goal", answers.profitGoal],
-    ["Branding Goal", answers.brandingGoal],
-    ["Notes", answers.notes || "No extra notes"],
+  const sections = [
+    {
+      rows: [
+        ["Event Name", answers.eventName],
+        ["Event Type", answers.eventType],
+        ["City", answers.city],
+        ["Event Date", formatDateAnswer(answers.eventDate)],
+      ],
+      title: "Event Summary",
+    },
+    {
+      rows: [
+        ["Capacity", formatCapacityAnswer(answers.capacity)],
+        ["Budget", formatMoneyAnswer(answers.budget)],
+        ["Revenue Target", formatMoneyAnswer(answers.revenueTarget)],
+        ["Target Audience", answers.targetAudience],
+      ],
+      title: "Audience & Budget",
+    },
+    {
+      rows: [
+        ["Sponsor Priority", answers.sponsorPriority],
+        ["Ticket Sales Goal", answers.ticketSalesGoal],
+        ["Profit Goal", answers.profitGoal],
+        ["Branding Goal", answers.brandingGoal],
+      ],
+      title: "Business Goals",
+    },
+    {
+      rows: [["Notes", answers.notes || "No extra notes"]],
+      title: "Notes",
+    },
   ];
 
   return (
     <div className="rounded-xl border border-white/10 bg-slate-950/35 p-4">
       <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Collected answers</p>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {rows.map(([label, value]) => (
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-3" key={label}>
-            <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{label}</p>
-            <p className="mt-1 break-words text-sm font-medium text-white">{value}</p>
-          </div>
+      <div className="mt-4 grid gap-4">
+        {sections.map((section) => (
+          <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3" key={section.title}>
+            <h3 className="text-sm font-semibold text-white">{section.title}</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {section.rows.map(([label, value]) => (
+                <div className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-3" key={`${section.title}-${label}`}>
+                  <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{label}</p>
+                  <p className="mt-1 break-words text-sm font-medium text-white">{value}</p>
+                </div>
+              ))}
+            </div>
+          </section>
         ))}
       </div>
     </div>
   );
 }
 
+function formatMoneyAnswer(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const normalized = trimmed.replace(/^rs\.?\s*/i, "").replace(/^inr\s*/i, "").trim();
+  const numericValue = Number(normalized.replace(/[₹,\s]/g, ""));
+  if (Number.isFinite(numericValue) && normalized.replace(/[₹,\s]/g, "") !== "") {
+    return `₹${numericValue.toLocaleString("en-IN")}`;
+  }
+
+  return trimmed.startsWith("₹") ? trimmed : `₹${normalized}`;
+}
+
+function formatDateAnswer(value: string) {
+  if (!value.trim()) {
+    return "";
+  }
+
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatCapacityAnswer(value: string) {
+  const capacity = Number(value);
+  return Number.isFinite(capacity) && capacity > 0 ? capacity.toLocaleString("en-IN") : value;
+}
+
 function ClarificationField({
+  formatValue,
   icon,
+  inputMode,
   label,
   onChange,
   placeholder,
@@ -521,7 +620,9 @@ function ClarificationField({
   type = "text",
   value,
 }: {
+  formatValue?: (value: string) => string;
   icon?: ReactNode;
+  inputMode?: "decimal" | "email" | "numeric" | "search" | "tel" | "text" | "url";
   label: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -529,6 +630,9 @@ function ClarificationField({
   type?: "date" | "number" | "text";
   value: string;
 }) {
+  const [isFocused, setIsFocused] = useState(false);
+  const displayValue = formatValue && !isFocused ? formatValue(value) : value;
+
   return (
     <label className="block">
       <span className="flex items-center gap-2 text-xs uppercase tracking-[0.12em] text-app-muted">
@@ -538,11 +642,14 @@ function ClarificationField({
       </span>
       <input
         className="dashboard-input mt-2 h-11 w-full"
-        min={type === "number" ? "0" : undefined}
+        inputMode={inputMode}
+        min={type === "number" && !formatValue ? "0" : undefined}
+        onBlur={() => setIsFocused(false)}
         onChange={(event) => onChange(event.target.value)}
+        onFocus={() => setIsFocused(true)}
         placeholder={placeholder}
-        type={type}
-        value={value}
+        type={formatValue ? "text" : type}
+        value={displayValue}
       />
     </label>
   );
