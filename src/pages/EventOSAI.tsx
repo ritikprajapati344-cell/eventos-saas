@@ -5,11 +5,16 @@ import {
   CheckCircle2,
   Crown,
   FileText,
+  Megaphone,
   Mic,
   Music2,
+  ShieldAlert,
   Sparkles,
+  Ticket,
+  Timer,
   TrendingUp,
   Users,
+  WalletCards,
   X,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -66,6 +71,17 @@ const clarificationSteps = [
   "Review",
 ];
 
+const processingSteps = [
+  "Understanding your event",
+  "Validating requirements",
+  "Planning event structure",
+  "Estimating budget",
+  "Building revenue strategy",
+  "Building sponsor strategy",
+  "Preparing execution timeline",
+  "Finalizing blueprint",
+];
+
 const initialClarificationAnswers = {
   brandingGoal: "",
   budget: "",
@@ -83,6 +99,7 @@ const initialClarificationAnswers = {
 };
 
 type ClarificationAnswers = typeof initialClarificationAnswers;
+type BlueprintStage = "command" | "processing" | "preview";
 
 function getCommandPrefill(commandText: string): Partial<ClarificationAnswers> {
   const normalized = commandText.toLowerCase();
@@ -126,6 +143,8 @@ export default function EventOSAI({ data }: EventOSAIProps) {
   const [isClarifying, setIsClarifying] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState<ClarificationAnswers>(initialClarificationAnswers);
+  const [blueprintStage, setBlueprintStage] = useState<BlueprintStage>("command");
+  const [activeProcessingStep, setActiveProcessingStep] = useState(0);
   const [validationMessage, setValidationMessage] = useState("");
   const [blueprintMessage, setBlueprintMessage] = useState("");
 
@@ -138,6 +157,8 @@ export default function EventOSAI({ data }: EventOSAIProps) {
 
     setValidationMessage("");
     setAnswers(buildPrefilledAnswers(command));
+    setBlueprintStage("command");
+    setActiveProcessingStep(0);
     setCurrentStep(0);
     setIsClarifying(true);
   };
@@ -147,6 +168,8 @@ export default function EventOSAI({ data }: EventOSAIProps) {
     setCurrentStep(0);
     setValidationMessage("");
     setBlueprintMessage("");
+    setBlueprintStage("command");
+    setActiveProcessingStep(0);
     setAnswers(initialClarificationAnswers);
   };
 
@@ -181,8 +204,38 @@ export default function EventOSAI({ data }: EventOSAIProps) {
     }
 
     setValidationMessage("");
-    setBlueprintMessage("Your answers are ready. Blueprint generation will be activated in the next approved sprint.");
+    setBlueprintMessage("");
+    setIsClarifying(false);
+    setActiveProcessingStep(0);
+    setBlueprintStage("processing");
   };
+
+  const showCommandCenter = () => {
+    setBlueprintStage("command");
+    setActiveProcessingStep(0);
+    setBlueprintMessage("");
+    setValidationMessage("");
+  };
+
+  if (blueprintStage === "processing") {
+    return (
+      <ProcessingExperience
+        activeStep={activeProcessingStep}
+        onStepComplete={() => {
+          if (activeProcessingStep >= processingSteps.length - 1) {
+            setBlueprintStage("preview");
+            return;
+          }
+
+          setActiveProcessingStep((step) => Math.min(step + 1, processingSteps.length - 1));
+        }}
+      />
+    );
+  }
+
+  if (blueprintStage === "preview") {
+    return <BlueprintPreview answers={answers} command={command} onBack={showCommandCenter} />;
+  }
 
   return (
     <div className="space-y-5">
@@ -318,6 +371,253 @@ export default function EventOSAI({ data }: EventOSAIProps) {
         </p>
       </section>
     </div>
+  );
+}
+
+function ProcessingExperience({
+  activeStep,
+  onStepComplete,
+}: {
+  activeStep: number;
+  onStepComplete: () => void;
+}) {
+  return (
+    <section className="relative flex min-h-[calc(100vh-9rem)] items-center justify-center overflow-hidden rounded-xl border border-app-primary/25 bg-slate-950/72 p-4 shadow-premium sm:p-6 lg:p-8">
+      <style>
+        {`
+          @keyframes eventosAiProcessingStep {
+            0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+            55% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+          }
+        `}
+      </style>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-app-primary/70 to-transparent" />
+      <div className="pointer-events-none absolute -left-16 top-20 h-56 w-56 rounded-full bg-app-primary/10 blur-3xl" />
+      <div className="pointer-events-none absolute -right-16 bottom-16 h-64 w-64 rounded-full bg-blue-400/10 blur-3xl" />
+
+      <div className="relative w-full max-w-4xl">
+        <div className="text-center">
+          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-app-primary/30 bg-app-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-blue-100">
+            <Sparkles size={14} />
+            EventOS AI
+          </div>
+          <h1 className="mt-5 text-3xl font-semibold tracking-normal text-white sm:text-5xl">
+            Preparing your event blueprint...
+          </h1>
+          <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-app-muted sm:text-base">
+            EventOS AI is arranging the plan into a blueprint preview. This is a UI-only planning experience; no AI service or database action is running.
+          </p>
+        </div>
+
+        <div className="mt-8 grid gap-3">
+          {processingSteps.map((step, index) => {
+            const isComplete = index < activeStep;
+            const isActive = index === activeStep;
+            return (
+              <div
+                className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition ${
+                  isComplete
+                    ? "border-app-success/35 bg-app-success/10 text-green-100"
+                    : isActive
+                      ? "border-app-primary/45 bg-app-primary/12 text-white shadow-glow"
+                      : "border-white/10 bg-white/[0.035] text-slate-400"
+                }`}
+                key={step}
+                onAnimationEnd={isActive ? onStepComplete : undefined}
+                style={isActive ? { animation: "eventosAiProcessingStep 520ms ease-out forwards" } : undefined}
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-current/30">
+                  {isComplete || isActive ? <CheckCircle2 size={17} /> : index + 1}
+                </span>
+                <span className="text-sm font-medium sm:text-base">{step}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BlueprintPreview({
+  answers,
+  command,
+  onBack,
+}: {
+  answers: ClarificationAnswers;
+  command: string;
+  onBack: () => void;
+}) {
+  const eventName = answers.eventName || "AI Event Blueprint";
+  const city = answers.city || "Selected city";
+  const eventType = answers.eventType || "Event";
+  const capacity = formatCapacityAnswer(answers.capacity) || "Audience size pending";
+  const budget = formatMoneyAnswer(answers.budget) || "Budget pending";
+  const revenueTarget = formatMoneyAnswer(answers.revenueTarget) || "Revenue target pending";
+  const eventDate = formatDateAnswer(answers.eventDate) || "Date pending";
+
+  const sections = [
+    {
+      icon: FileText,
+      items: [
+        ["Event", eventName],
+        ["Type", eventType],
+        ["City", city],
+        ["Date", eventDate],
+        ["Capacity", capacity],
+      ],
+      summary: "A professional event structure based on the clarified command.",
+      title: "Event Summary",
+    },
+    {
+      icon: WalletCards,
+      items: [
+        ["Working Budget", budget],
+        ["Expense Focus", "Venue, production, talent, marketing, and operating buffer"],
+        ["Control Point", "Keep high-cost commitments visible before approval"],
+      ],
+      summary: "Budget planning placeholders are ready for the Sprint 2 generator.",
+      title: "Budget",
+    },
+    {
+      icon: TrendingUp,
+      items: [
+        ["Revenue Target", revenueTarget],
+        ["Primary Driver", "Ticket revenue plus sponsor support"],
+        ["Planning Signal", "Track break-even and profit exposure"],
+      ],
+      summary: "Revenue strategy will become model-generated after AI activation.",
+      title: "Revenue",
+    },
+    {
+      icon: Timer,
+      items: [
+        ["Phase 1", "Blueprint review and approval"],
+        ["Phase 2", "Tickets, sponsor, and vendor preparation"],
+        ["Phase 3", "Final readiness and show-day execution"],
+      ],
+      summary: "Timeline placeholders mirror the approved V2 blueprint flow.",
+      title: "Timeline",
+    },
+    {
+      icon: Users,
+      items: [
+        ["Sponsor Priority", answers.sponsorPriority || "Priority pending"],
+        ["Suggested Focus", "Local premium brands, lifestyle, automobile, education"],
+        ["Next Step", "Prepare sponsor strategy for approval"],
+      ],
+      summary: "Sponsor strategy remains preview-only in this sprint.",
+      title: "Sponsors",
+    },
+    {
+      icon: Megaphone,
+      items: [
+        ["Audience", answers.targetAudience || "Target audience pending"],
+        ["Campaign Focus", "Announcement, early interest, conversion, final push"],
+        ["Branding Goal", answers.brandingGoal || "Branding goal pending"],
+      ],
+      summary: "Marketing cards prepare the structure without sending messages.",
+      title: "Marketing",
+    },
+    {
+      icon: ShieldAlert,
+      items: [
+        ["Risk Watch", "Revenue gap, sponsor shortfall, timeline delay"],
+        ["Mitigation", "Keep approvals and execution steps separated"],
+        ["Confidence", "Preview only until Sprint 2 AI generation"],
+      ],
+      summary: "Risk planning stays advisory and non-executing.",
+      title: "Risks",
+    },
+    {
+      icon: Ticket,
+      items: [
+        ["Task Group 1", "Confirm core event details"],
+        ["Task Group 2", "Draft ticket and sponsor plan"],
+        ["Task Group 3", "Prepare approval-ready execution checklist"],
+      ],
+      summary: "Task checklist previews the execution shape without creating records.",
+      title: "Task Checklist",
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <section className="relative overflow-hidden rounded-xl border border-app-primary/25 bg-slate-950/70 p-4 shadow-premium sm:p-6 lg:p-8">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-app-primary/70 to-transparent" />
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-app-primary/30 bg-app-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-blue-100">
+              <Sparkles size={14} />
+              Blueprint Preview
+            </div>
+            <h1 className="mt-5 text-3xl font-semibold tracking-normal text-white sm:text-5xl">
+              {eventName}
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-app-muted sm:text-base">
+              A premium preview generated from your command and clarification answers. AI Generation available in Sprint 2.
+            </p>
+            <p className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-300">
+              {command.trim()}
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
+            <span className="inline-flex min-h-10 items-center justify-center rounded-full border border-app-warning/30 bg-app-warning/10 px-4 text-sm font-medium text-amber-100">
+              AI Generation available in Sprint 2
+            </span>
+            <button
+              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/[0.07]"
+              onClick={onBack}
+              type="button"
+            >
+              Back to Command Center
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        {sections.map((section) => (
+          <BlueprintSectionCard key={section.title} section={section} />
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function BlueprintSectionCard({
+  section,
+}: {
+  section: {
+    icon: typeof FileText;
+    items: string[][];
+    summary: string;
+    title: string;
+  };
+}) {
+  const Icon = section.icon;
+
+  return (
+    <article className="rounded-xl border border-white/10 bg-white/[0.04] p-4 shadow-premium backdrop-blur-xl sm:p-5">
+      <div className="flex items-start gap-3">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-app-primary/30 bg-app-primary/10 text-blue-100">
+          <Icon size={20} />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-white">{section.title}</h2>
+          <p className="mt-1 text-sm leading-6 text-app-muted">{section.summary}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3">
+        {section.items.map(([label, value]) => (
+          <div className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-3" key={`${section.title}-${label}`}>
+            <p className="text-xs uppercase tracking-[0.12em] text-app-muted">{label}</p>
+            <p className="mt-1 break-words text-sm font-medium text-white">{value}</p>
+          </div>
+        ))}
+      </div>
+    </article>
   );
 }
 
