@@ -17,7 +17,8 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { generateEventBlueprint, type BlueprintJson, type BlueprintPlannerRequest } from "../lib/blueprintPlannerClient";
 import type { EventOSData } from "../types";
 import { formatCurrency, formatNumber } from "../utils/finance";
 
@@ -100,6 +101,12 @@ const initialClarificationAnswers = {
 
 type ClarificationAnswers = typeof initialClarificationAnswers;
 type BlueprintStage = "command" | "processing" | "preview";
+type BlueprintSection = {
+  icon: typeof FileText;
+  items: string[][];
+  summary: string;
+  title: string;
+};
 
 function getCommandPrefill(commandText: string): Partial<ClarificationAnswers> {
   const normalized = commandText.toLowerCase();
@@ -145,11 +152,16 @@ export default function EventOSAI({ data }: EventOSAIProps) {
   const [answers, setAnswers] = useState<ClarificationAnswers>(initialClarificationAnswers);
   const [blueprintStage, setBlueprintStage] = useState<BlueprintStage>("command");
   const [activeProcessingStep, setActiveProcessingStep] = useState(0);
+  const [blueprint, setBlueprint] = useState<BlueprintJson | null>(null);
+  const [blueprintError, setBlueprintError] = useState("");
+  const [isBlueprintGenerating, setIsBlueprintGenerating] = useState(false);
   const [validationMessage, setValidationMessage] = useState("");
   const [blueprintMessage, setBlueprintMessage] = useState("");
+  const generationIdRef = useRef(0);
 
   const startClarification = () => {
     setBlueprintMessage("");
+    setBlueprintError("");
     if (!command.trim()) {
       setValidationMessage("Describe your event to start the clarification workflow.");
       return;
@@ -159,15 +171,20 @@ export default function EventOSAI({ data }: EventOSAIProps) {
     setAnswers(buildPrefilledAnswers(command));
     setBlueprintStage("command");
     setActiveProcessingStep(0);
+    setBlueprint(null);
     setCurrentStep(0);
     setIsClarifying(true);
   };
 
   const cancelClarification = () => {
+    generationIdRef.current += 1;
     setIsClarifying(false);
     setCurrentStep(0);
     setValidationMessage("");
     setBlueprintMessage("");
+    setBlueprintError("");
+    setBlueprint(null);
+    setIsBlueprintGenerating(false);
     setBlueprintStage("command");
     setActiveProcessingStep(0);
     setAnswers(initialClarificationAnswers);
@@ -177,6 +194,7 @@ export default function EventOSAI({ data }: EventOSAIProps) {
     setAnswers((current) => ({ ...current, [field]: value }));
     setValidationMessage("");
     setBlueprintMessage("");
+    setBlueprintError("");
   };
 
   const goNext = () => {
@@ -206,35 +224,75 @@ export default function EventOSAI({ data }: EventOSAIProps) {
     setValidationMessage("");
     setBlueprintMessage("");
     setIsClarifying(false);
-    setActiveProcessingStep(0);
-    setBlueprintStage("processing");
+    void generateBlueprint(answers);
   };
 
-  const showCommandCenter = () => {
+  const showReviewStep = () => {
+    generationIdRef.current += 1;
     setBlueprintStage("command");
     setActiveProcessingStep(0);
+    setIsBlueprintGenerating(false);
+    setIsClarifying(true);
+    setCurrentStep(clarificationSteps.length - 1);
     setBlueprintMessage("");
+    setBlueprintError("");
     setValidationMessage("");
+  };
+
+  const generateBlueprint = async (answersForRequest: ClarificationAnswers) => {
+    const generationId = generationIdRef.current + 1;
+    generationIdRef.current = generationId;
+    setActiveProcessingStep(0);
+    setBlueprint(null);
+    setBlueprintError("");
+    setBlueprintMessage("");
+    setBlueprintStage("processing");
+    setIsBlueprintGenerating(true);
+
+    try {
+      const response = await generateEventBlueprint(buildBlueprintPlannerRequest(command, answersForRequest, data));
+      if (generationIdRef.current !== generationId) return;
+      setBlueprint(response.blueprint);
+      setBlueprintMessage(response.message);
+      setBlueprintStage("preview");
+    } catch (error) {
+      if (generationIdRef.current !== generationId) return;
+      setBlueprintError(getBlueprintErrorMessage(error));
+      setBlueprintStage("preview");
+    } finally {
+      if (generationIdRef.current === generationId) {
+        setIsBlueprintGenerating(false);
+      }
+    }
   };
 
   if (blueprintStage === "processing") {
     return (
       <ProcessingExperience
         activeStep={activeProcessingStep}
+        isGenerating={isBlueprintGenerating}
+        onCancel={showReviewStep}
         onStepComplete={() => {
-          if (activeProcessingStep >= processingSteps.length - 1) {
-            setBlueprintStage("preview");
-            return;
+          if (activeProcessingStep < processingSteps.length - 1) {
+            setActiveProcessingStep((step) => Math.min(step + 1, processingSteps.length - 1));
           }
-
-          setActiveProcessingStep((step) => Math.min(step + 1, processingSteps.length - 1));
         }}
       />
     );
   }
 
   if (blueprintStage === "preview") {
-    return <BlueprintPreview answers={answers} command={command} onBack={showCommandCenter} />;
+    return (
+      <BlueprintPreview
+        answers={answers}
+        blueprint={blueprint}
+        errorMessage={blueprintError}
+        command={command}
+        isGenerating={isBlueprintGenerating}
+        onBack={showReviewStep}
+        onRetry={() => void generateBlueprint(answers)}
+      />
+    );
   }
 
   return (
@@ -272,7 +330,7 @@ export default function EventOSAI({ data }: EventOSAIProps) {
               />
               <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-app-muted">
-                  UI shell only. Blueprint generation will be connected in a later approved sprint.
+                  Generate a read-only EventOS AI blueprint. No records are created in this sprint.
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <button
@@ -376,9 +434,13 @@ export default function EventOSAI({ data }: EventOSAIProps) {
 
 function ProcessingExperience({
   activeStep,
+  isGenerating,
+  onCancel,
   onStepComplete,
 }: {
   activeStep: number;
+  isGenerating: boolean;
+  onCancel: () => void;
   onStepComplete: () => void;
 }) {
   return (
@@ -406,7 +468,7 @@ function ProcessingExperience({
             Preparing your event blueprint...
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-app-muted sm:text-base">
-            EventOS AI is arranging the plan into a blueprint preview. This is a UI-only planning experience; no AI service or database action is running.
+            EventOS AI is generating a contract-safe blueprint preview. This is read-only; no records, approvals, or executions are created.
           </p>
         </div>
 
@@ -435,6 +497,19 @@ function ProcessingExperience({
             );
           })}
         </div>
+
+        <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+          <p className="text-sm text-app-muted">
+            {isGenerating ? "Waiting for the planner response..." : "Finalizing preview..."}
+          </p>
+          <button
+            className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/[0.07]"
+            onClick={onCancel}
+            type="button"
+          >
+            Back to Review
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -442,105 +517,23 @@ function ProcessingExperience({
 
 function BlueprintPreview({
   answers,
+  blueprint,
   command,
+  errorMessage,
+  isGenerating,
   onBack,
+  onRetry,
 }: {
   answers: ClarificationAnswers;
+  blueprint: BlueprintJson | null;
   command: string;
+  errorMessage: string;
+  isGenerating: boolean;
   onBack: () => void;
+  onRetry: () => void;
 }) {
-  const eventName = answers.eventName || "AI Event Blueprint";
-  const city = answers.city || "Selected city";
-  const eventType = answers.eventType || "Event";
-  const capacity = formatCapacityAnswer(answers.capacity) || "Audience size pending";
-  const budget = formatMoneyAnswer(answers.budget) || "Budget pending";
-  const revenueTarget = formatMoneyAnswer(answers.revenueTarget) || "Revenue target pending";
-  const eventDate = formatDateAnswer(answers.eventDate) || "Date pending";
-
-  const sections = [
-    {
-      icon: FileText,
-      items: [
-        ["Event", eventName],
-        ["Type", eventType],
-        ["City", city],
-        ["Date", eventDate],
-        ["Capacity", capacity],
-      ],
-      summary: "A professional event structure based on the clarified command.",
-      title: "Event Summary",
-    },
-    {
-      icon: WalletCards,
-      items: [
-        ["Working Budget", budget],
-        ["Expense Focus", "Venue, production, talent, marketing, and operating buffer"],
-        ["Control Point", "Keep high-cost commitments visible before approval"],
-      ],
-      summary: "Budget planning placeholders are ready for the Sprint 2 generator.",
-      title: "Budget",
-    },
-    {
-      icon: TrendingUp,
-      items: [
-        ["Revenue Target", revenueTarget],
-        ["Primary Driver", "Ticket revenue plus sponsor support"],
-        ["Planning Signal", "Track break-even and profit exposure"],
-      ],
-      summary: "Revenue strategy will become model-generated after AI activation.",
-      title: "Revenue",
-    },
-    {
-      icon: Timer,
-      items: [
-        ["Phase 1", "Blueprint review and approval"],
-        ["Phase 2", "Tickets, sponsor, and vendor preparation"],
-        ["Phase 3", "Final readiness and show-day execution"],
-      ],
-      summary: "Timeline placeholders mirror the approved V2 blueprint flow.",
-      title: "Timeline",
-    },
-    {
-      icon: Users,
-      items: [
-        ["Sponsor Priority", answers.sponsorPriority || "Priority pending"],
-        ["Suggested Focus", "Local premium brands, lifestyle, automobile, education"],
-        ["Next Step", "Prepare sponsor strategy for approval"],
-      ],
-      summary: "Sponsor strategy remains preview-only in this sprint.",
-      title: "Sponsors",
-    },
-    {
-      icon: Megaphone,
-      items: [
-        ["Audience", answers.targetAudience || "Target audience pending"],
-        ["Campaign Focus", "Announcement, early interest, conversion, final push"],
-        ["Branding Goal", answers.brandingGoal || "Branding goal pending"],
-      ],
-      summary: "Marketing cards prepare the structure without sending messages.",
-      title: "Marketing",
-    },
-    {
-      icon: ShieldAlert,
-      items: [
-        ["Risk Watch", "Revenue gap, sponsor shortfall, timeline delay"],
-        ["Mitigation", "Keep approvals and execution steps separated"],
-        ["Confidence", "Preview only until Sprint 2 AI generation"],
-      ],
-      summary: "Risk planning stays advisory and non-executing.",
-      title: "Risks",
-    },
-    {
-      icon: Ticket,
-      items: [
-        ["Task Group 1", "Confirm core event details"],
-        ["Task Group 2", "Draft ticket and sponsor plan"],
-        ["Task Group 3", "Prepare approval-ready execution checklist"],
-      ],
-      summary: "Task checklist previews the execution shape without creating records.",
-      title: "Task Checklist",
-    },
-  ];
+  const eventName = getString(blueprint?.eventSummary.eventName) || answers.eventName || "AI Event Blueprint";
+  const sections = blueprint ? buildBlueprintSections(blueprint) : [];
 
   return (
     <div className="space-y-5">
@@ -556,32 +549,70 @@ function BlueprintPreview({
               {eventName}
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-app-muted sm:text-base">
-              A premium preview generated from your command and clarification answers. AI Generation available in Sprint 2.
+              {blueprint
+                ? "A validated, read-only EventOS AI blueprint generated from your command and clarification answers."
+                : "The planner could not return a complete contract-safe blueprint yet. Your answers are preserved for retry."}
             </p>
             <p className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-300">
               {command.trim()}
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
-            <span className="inline-flex min-h-10 items-center justify-center rounded-full border border-app-warning/30 bg-app-warning/10 px-4 text-sm font-medium text-amber-100">
-              AI Generation available in Sprint 2
+            <span className={`inline-flex min-h-10 items-center justify-center rounded-full border px-4 text-sm font-medium ${
+              blueprint
+                ? "border-app-success/30 bg-app-success/10 text-green-100"
+                : "border-app-warning/30 bg-app-warning/10 text-amber-100"
+            }`}>
+              {blueprint ? "AI Blueprint Generated" : "Blueprint needs retry"}
             </span>
             <button
               className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/[0.07]"
               onClick={onBack}
               type="button"
             >
-              Back to Command Center
+              Back to Review
             </button>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        {sections.map((section) => (
-          <BlueprintSectionCard key={section.title} section={section} />
-        ))}
-      </section>
+      {errorMessage && (
+        <section className="rounded-xl border border-app-warning/30 bg-app-warning/10 p-4 shadow-premium sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-100">Planner response incomplete</p>
+              <h2 className="mt-2 text-xl font-semibold text-white">The AI blueprint response was incomplete. Please try again.</h2>
+              <p className="mt-2 text-sm leading-6 text-amber-100/85">{errorMessage}</p>
+            </div>
+            <button
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-app-primary px-4 text-sm font-semibold text-white shadow-glow transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isGenerating}
+              onClick={onRetry}
+              type="button"
+            >
+              Retry Blueprint
+              <ArrowRight size={17} />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {blueprint && (
+        <>
+          {(blueprint.metadata.assumptions.length > 0 || blueprint.metadata.warnings.length > 0) && (
+            <section className="grid gap-4 lg:grid-cols-2">
+              <BlueprintListCard title="Planner Assumptions" items={blueprint.metadata.assumptions} />
+              <BlueprintListCard title="Validation Warnings" items={blueprint.metadata.warnings} />
+            </section>
+          )}
+
+          <section className="grid gap-4 lg:grid-cols-2">
+            {sections.map((section) => (
+              <BlueprintSectionCard key={section.title} section={section} />
+            ))}
+          </section>
+        </>
+      )}
     </div>
   );
 }
@@ -589,12 +620,7 @@ function BlueprintPreview({
 function BlueprintSectionCard({
   section,
 }: {
-  section: {
-    icon: typeof FileText;
-    items: string[][];
-    summary: string;
-    title: string;
-  };
+  section: BlueprintSection;
 }) {
   const Icon = section.icon;
 
@@ -619,6 +645,253 @@ function BlueprintSectionCard({
       </div>
     </article>
   );
+}
+
+function BlueprintListCard({ items, title }: { items: string[]; title: string }) {
+  return (
+    <article className="rounded-xl border border-white/10 bg-white/[0.04] p-4 shadow-premium backdrop-blur-xl sm:p-5">
+      <h2 className="text-lg font-semibold text-white">{title}</h2>
+      <div className="mt-4 grid gap-2">
+        {items.map((item, index) => (
+          <p className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-sm leading-6 text-slate-200" key={`${title}-${index}-${item}`}>
+            {item}
+          </p>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function buildBlueprintSections(blueprint: BlueprintJson): BlueprintSection[] {
+  const milestones = getRecordList(blueprint.timeline.milestones);
+  const sponsorCategories = getStringList(blueprint.sponsors.categories);
+  const recommendedSponsors = getRecordList(blueprint.sponsors.recommendedSponsors);
+  const marketingChannels = getStringList(blueprint.marketing.channels);
+  const contentIdeas = getStringList(blueprint.marketing.contentIdeas);
+  const risks = getRecordList(blueprint.risks.items);
+  const tasks = getRecordList(blueprint.taskChecklist.tasks);
+  const approvalItems = getRecordList(blueprint.approvals.items);
+
+  return [
+    {
+      icon: FileText,
+      items: [
+        ["Event", getString(blueprint.eventSummary.eventName) || "Not specified"],
+        ["Type", getString(blueprint.eventSummary.eventType) || "Not specified"],
+        ["City", getString(blueprint.eventSummary.city) || "Not specified"],
+        ["Date", formatDateAnswer(getString(blueprint.eventSummary.eventDate)) || "Not specified"],
+        ["Capacity", formatBlueprintNumber(blueprint.eventSummary.capacity)],
+        ["Venue", getString(blueprint.eventSummary.venueRecommendation) || "Not specified"],
+      ],
+      summary: getString(blueprint.eventSummary.executiveSummary) || "AI-generated event summary.",
+      title: "Event Summary",
+    },
+    {
+      icon: WalletCards,
+      items: [
+        ["Total Budget", formatBlueprintCurrency(blueprint.budget.totalBudget)],
+        ["Estimated Expenses", formatBlueprintCurrency(blueprint.budget.estimatedExpenses)],
+        ["Top Expense Areas", summarizeRecords(getRecordList(blueprint.budget.expenseBreakdown), "category", "amount")],
+        ["Confidence", formatConfidence(blueprint.budget.confidence)],
+      ],
+      summary: "Budget plan generated from the planner contract.",
+      title: "Budget",
+    },
+    {
+      icon: TrendingUp,
+      items: [
+        ["Target Revenue", formatBlueprintCurrency(blueprint.revenue.targetRevenue)],
+        ["Projected Revenue", formatBlueprintCurrency(blueprint.revenue.projectedRevenue)],
+        ["Estimated Profit", formatBlueprintCurrency(blueprint.revenue.estimatedProfit)],
+        ["Break-even Revenue", formatBlueprintCurrency(blueprint.revenue.breakEvenRevenue)],
+        ["Revenue Recommendations", summarizeStrings(getStringList(blueprint.revenue.recommendations))],
+      ],
+      summary: "Revenue forecast is read-only and not written to finance records.",
+      title: "Revenue",
+    },
+    {
+      icon: Timer,
+      items: [
+        ["Milestones", formatBlueprintNumber(milestones.length)],
+        ["Priority Milestones", summarizeRecords(milestones, "title", "priority")],
+        ["First Suggested Date", getString(milestones[0]?.suggestedDate) || "Not specified"],
+      ],
+      summary: "Timeline milestones are preview-only until future approval and execution.",
+      title: "Timeline",
+    },
+    {
+      icon: Users,
+      items: [
+        ["Sponsor Target", formatBlueprintCurrency(blueprint.sponsors.targetRevenue)],
+        ["Categories", summarizeStrings(sponsorCategories)],
+        ["Recommended Sponsors", summarizeRecords(recommendedSponsors, "name", "estimatedValue")],
+        ["Pitch Strategy", getString(blueprint.sponsors.pitchStrategy) || "Not specified"],
+      ],
+      summary: "Sponsor strategy is advisory only; no sponsor records are created.",
+      title: "Sponsors",
+    },
+    {
+      icon: Megaphone,
+      items: [
+        ["Campaign Strategy", getString(blueprint.marketing.campaignStrategy) || "Not specified"],
+        ["Channels", summarizeStrings(marketingChannels)],
+        ["Content Ideas", summarizeStrings(contentIdeas)],
+        ["Estimated Reach", formatBlueprintNumber(blueprint.marketing.estimatedReach)],
+      ],
+      summary: "Marketing plan is preview-only; no messages or campaigns are sent.",
+      title: "Marketing",
+    },
+    {
+      icon: ShieldAlert,
+      items: [
+        ["Risk Level", getString(blueprint.risks.overallRiskLevel) || "Not specified"],
+        ["Risk Score", formatBlueprintNumber(blueprint.risks.overallRiskScore)],
+        ["Top Risks", summarizeRecords(risks, "title", "severity")],
+        ["Confidence", formatConfidence(blueprint.risks.confidence)],
+      ],
+      summary: "Risks must be reviewed before any future approval flow.",
+      title: "Risks",
+    },
+    {
+      icon: Ticket,
+      items: [
+        ["Task Count", formatBlueprintNumber(tasks.length)],
+        ["Priority Tasks", summarizeRecords(tasks, "title", "priority")],
+        ["Approval Items", formatBlueprintNumber(approvalItems.length)],
+        ["Execution Preview", summarizeExecutionPreview(blueprint.approvals.executionPreview)],
+      ],
+      summary: "Task checklist and approvals are displayed only; no execution runs in Sprint 2.1.",
+      title: "Task Checklist",
+    },
+  ];
+}
+
+function buildBlueprintPlannerRequest(
+  command: string,
+  answers: ClarificationAnswers,
+  data: EventOSData,
+): BlueprintPlannerRequest {
+  const activeEvents = data.events.filter((event) => !event.archived && event.status !== "Completed");
+  const completedEvents = data.events.filter((event) => event.status === "Completed");
+  const primaryCities = uniqueStrings([answers.city, ...data.events.map((event) => event.city)]);
+  const eventTypes = uniqueStrings([answers.eventType, ...data.events.map((event) => event.eventType)]);
+
+  return {
+    blueprintJsonContractVersion: "v1",
+    clarificationAnswers: {
+      brandingGoal: answers.brandingGoal.trim(),
+      budget: parsePlannerNumber(answers.budget),
+      capacity: parsePlannerNumber(answers.capacity),
+      city: answers.city.trim(),
+      eventDate: answers.eventDate.trim(),
+      eventName: answers.eventName.trim(),
+      eventType: answers.eventType.trim(),
+      notes: answers.notes.trim(),
+      profitGoal: answers.profitGoal.trim(),
+      revenueTarget: parsePlannerNumber(answers.revenueTarget),
+      sponsorPriority: answers.sponsorPriority.trim(),
+      targetAudience: answers.targetAudience.trim(),
+      ticketSalesGoal: answers.ticketSalesGoal.trim(),
+    },
+    currentDate: new Date().toISOString().slice(0, 10),
+    futureMemoryContext: {
+      enabled: false,
+      items: [],
+    },
+    futureResearchContext: {
+      enabled: false,
+      sources: [],
+    },
+    originalCommand: command.trim(),
+    workspaceContext: {
+      currency: "INR",
+      eventTypes,
+      existingEventsSummary: {
+        activeEvents: activeEvents.length,
+        completedEvents: completedEvents.length,
+        totalEvents: data.events.length,
+      },
+      primaryCities,
+      timezone: "Asia/Kolkata",
+      workspaceName: "EventOS Workspace",
+    },
+  };
+}
+
+function getBlueprintErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message || "The AI blueprint response was incomplete. Please try again.";
+}
+
+function getString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => getString(item)).filter(Boolean)
+    : [];
+}
+
+function getRecordList(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item))
+    : [];
+}
+
+function formatBlueprintCurrency(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? formatCurrency(value) : "Not specified";
+}
+
+function formatBlueprintNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? formatNumber(value) : "Not specified";
+}
+
+function formatConfidence(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)}%` : "Not specified";
+}
+
+function summarizeStrings(items: string[], emptyLabel = "Not specified") {
+  return items.length > 0 ? items.slice(0, 4).join(", ") : emptyLabel;
+}
+
+function summarizeRecords(records: Array<Record<string, unknown>>, labelKey: string, detailKey: string) {
+  if (records.length === 0) {
+    return "Not specified";
+  }
+
+  return records
+    .slice(0, 3)
+    .map((record) => {
+      const label = getString(record[labelKey]) || "Item";
+      const detail = typeof record[detailKey] === "number"
+        ? formatCurrency(record[detailKey])
+        : getString(record[detailKey]);
+
+      return detail ? `${label} (${detail})` : label;
+    })
+    .join(", ");
+}
+
+function summarizeExecutionPreview(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return "Not specified";
+  }
+
+  return Object.entries(value)
+    .filter(([, entry]) => Boolean(entry))
+    .slice(0, 4)
+    .map(([key, entry]) => `${key}: ${String(entry)}`)
+    .join(", ") || "No executable actions proposed";
+}
+
+function parsePlannerNumber(value: string) {
+  const numericValue = Number(value.replace(/[₹,\s]/g, ""));
+  return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).slice(0, 8);
 }
 
 function ClarificationPanel({
@@ -653,7 +926,7 @@ function ClarificationPanel({
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-app-primary">Clarification Engine UI</p>
           <h2 className="mt-1 text-2xl font-semibold text-white">{clarificationSteps[currentStep]}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">
-            EventOS AI is collecting the missing context before a blueprint can be generated. No AI, database, or execution logic runs in this sprint.
+            EventOS AI is collecting the missing context before generating a read-only blueprint. No database or execution logic runs in this sprint.
           </p>
         </div>
         <button
